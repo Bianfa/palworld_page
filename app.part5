@@ -1,0 +1,63 @@
+async function importBackup(file) {
+  try {
+    const parsed=JSON.parse(await file.text()); store=normalize(parsed.data||parsed); save(); renderAll();
+  } catch { alert("El archivo no es un respaldo válido."); }
+}
+async function connectCloud() {
+  const config = FIREBASE_CONFIG;
+  const workspaceId=$("#workspaceInput").value.trim();
+  try {
+    const mod=await import(new URL("./firebase-sync.js", location.href).href);
+    syncReady=false; remoteInitialized=false;
+    sync=await mod.connectFirebaseSync({config,workspaceId,clientId,
+      onStatus:(kind,text)=>setSyncStatus(kind,text),
+      onRemote:async(remote,meta)=>{
+        if (!remoteInitialized) {
+          remoteInitialized=true;
+          if (!remote?.payload) { syncReady=true; await sync.push(clone(store),++revision); lastPayloadJson=JSON.stringify(store); return; }
+          const remoteJson=JSON.stringify(remote.payload);
+          const localJson=JSON.stringify(store);
+          if (remoteJson!==localJson) {
+            const load=confirm("Ya existen datos sincronizados. Aceptar carga la nube; Cancelar conserva este dispositivo y reemplaza la nube.");
+            if (load) { store=normalize(remote.payload); localStorage.setItem(STORAGE_KEY,JSON.stringify(store)); lastPayloadJson=JSON.stringify(store); renderAll(); }
+            else { syncReady=true; await sync.push(clone(store),++revision); lastPayloadJson=JSON.stringify(store); }
+          } else lastPayloadJson=remoteJson;
+          syncReady=true; setSyncStatus("online","Sincronizado"); return;
+        }
+        if (meta.pendingWrites || !remote?.payload) return;
+        const remoteJson=JSON.stringify(remote.payload);
+        if (remoteJson!==JSON.stringify(store)) { store=normalize(remote.payload); localStorage.setItem(STORAGE_KEY,JSON.stringify(store)); lastPayloadJson=remoteJson; renderAll(); $("#saveNote").textContent="Cambios recibidos desde otro dispositivo."; }
+      }
+    });
+    localStorage.setItem(FIREBASE_KEY,JSON.stringify({workspaceId}));
+    syncReady=true; setSyncStatus("online","Sincronizado");
+  } catch(e) { setSyncStatus("error",e.message); }
+}
+function disconnectCloud() { syncReady=false; sync?.disconnect?.(); sync=null; localStorage.removeItem(FIREBASE_KEY); setSyncStatus("local","Solo local"); }
+
+// Events
+document.addEventListener("click",(e)=>{
+  const el=e.target.closest("[data-action]"); if(!el)return;
+  const a=el.dataset.action;
+  if(a==="open-base"){activeBase=Number(el.dataset.base);renderAll();}
+  if(a==="toggle-status"){const r=findRow(el.dataset.collection,el.dataset.id);if(r){r.status=r.status==="OK"?"NO":"OK";save();renderAll();}}
+  if(a==="add-row")addRow(el.dataset.collection,el.dataset.base);
+  if(a==="delete-row")deleteRow(el.dataset.collection,el.dataset.id);
+});
+document.addEventListener("input",(e)=>{if(e.target.matches("[data-field]") && !["SELECT","INPUT"].includes(e.target.tagName)){updateField(e.target);}});
+document.addEventListener("change",(e)=>{if(e.target.matches("[data-field]")){updateField(e.target);if(e.target.tagName==="SELECT" || e.target.type==="number") renderAll();}});
+$("#editBtn").addEventListener("click",()=>{editMode=!editMode;renderAll();});
+$("#exportBtn").addEventListener("click",exportBackup);
+$("#importBtn").addEventListener("click",()=>$("#importFile").click());
+$("#importFile").addEventListener("change",e=>{if(e.target.files[0])importBackup(e.target.files[0]);e.target.value="";});
+$("#printBtn").addEventListener("click",()=>window.print());
+$("#syncBtn").addEventListener("click",()=>{const saved=getFirebaseSaved();$("#workspaceInput").value=saved?.workspaceId||DEFAULT_WORKSPACE_ID;$("#syncDialog").showModal();});
+$("#closeSyncBtn").addEventListener("click",()=>$("#syncDialog").close());
+$("#connectBtn").addEventListener("click",connectCloud);
+$("#disconnectBtn").addEventListener("click",disconnectCloud);
+
+renderAll();
+const savedFirebase=getFirebaseSaved() || {workspaceId:DEFAULT_WORKSPACE_ID};
+localStorage.setItem(FIREBASE_KEY,JSON.stringify(savedFirebase));
+$("#workspaceInput").value=savedFirebase.workspaceId;
+connectCloud();
