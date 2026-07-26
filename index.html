@@ -4,58 +4,69 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#12355b">
-  <title>Plan de Bases Palworld 1.0</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>Cargando Plan de Bases Palworld…</title>
+  <style>
+    body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#f4f7fb;color:#122033;display:grid;min-height:100vh;place-items:center}
+    main{max-width:620px;padding:28px;text-align:center}.spinner{width:42px;height:42px;border:4px solid #dbe4ef;border-top-color:#0b5cff;border-radius:50%;margin:0 auto 18px;animation:girar .8s linear infinite}@keyframes girar{to{transform:rotate(360deg)}}
+    #error{display:none;text-align:left;background:#fff;border:1px solid #e6b5b0;border-radius:12px;padding:16px;color:#8b1e18}
+  </style>
 </head>
 <body>
-<header>
-  <div class="wrap header-row">
-    <div>
-      <h1>Plan de Bases Palworld 1.0</h1>
-      <p>6 bases utilizables · máximo 35 Pals · checklist editable y sincronizable</p>
-    </div>
-    <div class="sync-pill" id="syncPill">Solo local</div>
-  </div>
-</header>
-<main class="wrap">
-  <div class="toolbar">
-    <button class="primary" id="editBtn" type="button">Activar edición</button>
-    <button id="syncBtn" type="button">Configurar sincronización</button>
-    <button id="exportBtn" type="button">Exportar respaldo</button>
-    <button id="importBtn" type="button">Importar respaldo</button>
-    <input id="importFile" type="file" accept="application/json,.json" hidden>
-    <button id="printBtn" type="button">Imprimir / PDF</button>
-  </div>
-  <p class="save-note" id="saveNote" aria-live="polite">Cambios guardados localmente.</p>
-  <section class="metrics">
-    <div class="metric"><small>Avance global</small><strong id="globalPct">0%</strong><div class="progress"><span id="globalBar"></span></div></div>
-    <div class="metric"><small>Tareas completas</small><strong id="globalDone">0</strong></div>
-    <div class="metric"><small>Total de tareas</small><strong id="globalTotal">0</strong></div>
-    <div class="metric"><small>Versión</small><strong id="appVersion">2.1.0</strong></div>
-  </section>
-  <div class="tabs" id="tabs"></div>
-  <section id="panels"></section>
-  <section class="card" id="breedingPanel"></section>
-  <section class="card" id="sourcesPanel"></section>
+<main>
+  <div class="spinner" id="spinner"></div>
+  <h1>Plan de Bases Palworld 1.0</h1>
+  <p id="status">Cargando la aplicación…</p>
+  <div id="error"></div>
 </main>
-<footer class="wrap">El código y los datos están separados: actualizar la web no borra el progreso local ni el documento de sincronización.</footer>
+<script type="module">
+  import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 
-<dialog id="syncDialog">
-  <form method="dialog" class="dialog-card" id="syncForm">
-    <h2>Sincronización con Firebase</h2>
-    <p>La aplicación está conectada al proyecto <strong>palgremio</strong> y usa automáticamente el mismo tablero compartido. Este campo puede cambiarse solo si quieren crear un tablero separado.</p>
-    <label>ID compartido del espacio
-      <input id="workspaceInput" type="text" autocomplete="off">
-    </label>
-    <p class="hint">En modo prueba, cualquier persona con el enlace del sitio puede modificar este tablero. Es adecuado solo para esta organización de juego.</p>
-    <div class="dialog-actions">
-      <button value="cancel" type="button" id="closeSyncBtn">Cerrar</button>
-      <button type="button" id="disconnectBtn">Desconectar nube</button>
-      <button class="primary" type="button" id="connectBtn">Conectar y sincronizar</button>
-    </div>
-    <p id="syncMessage" class="save-note" aria-live="polite"></p>
-  </form>
-</dialog>
-<script type="module" src="app.js"></script>
+  const names = ["site.b64.00", "site.b64.01", "site.b64.02", "site.b64.03"];
+  const status = document.querySelector("#status");
+  const errorBox = document.querySelector("#error");
+
+  try {
+    status.textContent = "Reconstruyendo la última versión…";
+    const chunks = await Promise.all(names.map(async (name) => {
+      const response = await fetch(`${name}?v=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`No se pudo descargar ${name}`);
+      return response.text();
+    }));
+
+    const base64 = chunks.join("").replace(/\s+/g, "");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
+    const zip = await JSZip.loadAsync(bytes);
+    const required = ["index.html", "styles.css", "app.js", "firebase-sync.js"];
+    for (const file of required) if (!zip.file(file)) throw new Error(`El paquete no contiene ${file}`);
+
+    const [html, css, firebaseModule] = await Promise.all([
+      zip.file("index.html").async("string"),
+      zip.file("styles.css").async("string"),
+      zip.file("firebase-sync.js").async("string")
+    ]);
+    let app = await zip.file("app.js").async("string");
+
+    const firebaseUrl = URL.createObjectURL(new Blob([firebaseModule], { type: "text/javascript" }));
+    app = app.replaceAll('"./firebase-sync.js"', JSON.stringify(firebaseUrl));
+    const appUrl = URL.createObjectURL(new Blob([app], { type: "text/javascript" }));
+
+    const finalHtml = html
+      .replace(/<link[^>]+href=["']styles\.css["'][^>]*>/i, `<style>${css}</style>`)
+      .replace(/<script[^>]+src=["']app\.js["'][^>]*><\/script>/i, `<script type="module" src="${appUrl}"><\/script>`);
+
+    document.open();
+    document.write(finalHtml);
+    document.close();
+  } catch (error) {
+    document.querySelector("#spinner").style.display = "none";
+    status.textContent = "No fue posible abrir la aplicación.";
+    errorBox.style.display = "block";
+    errorBox.textContent = `${error.message}. Recarga la página con Ctrl+F5; si continúa, revisaremos el despliegue.`;
+    console.error(error);
+  }
+</script>
 </body>
 </html>
