@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12355b">
+  <title>Plan de Bases Palworld 1.0</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="wrap header-row">
+    <div>
+      <h1>Plan de Bases Palworld 1.0</h1>
+      <p>6 bases utilizables · máximo 35 Pals · checklist editable y sincronizable</p>
+    </div>
+    <div class="sync-pill" id="syncPill">Solo local</div>
+  </div>
+</header>
+<main class="wrap">
+  <div class="toolbar">
+    <button class="primary" id="editBtn" type="button">Activar edición</button>
+    <button id="syncBtn" type="button">Configurar sincronización</button>
+    <button id="exportBtn" type="button">Exportar respaldo</button>
+    <button id="importBtn" type="button">Importar respaldo</button>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
+    <button id="printBtn" type="button">Imprimir / PDF</button>
+  </div>
+  <p class="save-note" id="saveNote" aria-live="polite">Cambios guardados localmente.</p>
+  <section class="metrics">
+    <div class="metric"><small>Avance global</small><strong id="globalPct">0%</strong><div class="progress"><span id="globalBar"></span></div></div>
+    <div class="metric"><small>Tareas completas</small><strong id="globalDone">0</strong></div>
+    <div class="metric"><small>Total de tareas</small><strong id="globalTotal">0</strong></div>
+    <div class="metric"><small>Versión</small><strong id="appVersion">2.1.0</strong></div>
+  </section>
+  <div class="tabs" id="tabs"></div>
+  <section id="panels"></section>
+  <section class="card" id="breedingPanel"></section>
+  <section class="card" id="sourcesPanel"></section>
+</main>
+<footer class="wrap">El código y los datos están separados: actualizar la web no borra el progreso local ni el documento de sincronización.</footer>
+
+<dialog id="syncDialog">
+  <form method="dialog" class="dialog-card" id="syncForm">
+    <h2>Sincronización con Firebase</h2>
+    <p>La aplicación está conectada al proyecto <strong>palgremio</strong> y usa automáticamente el mismo tablero compartido. Este campo puede cambiarse solo si quieren crear un tablero separado.</p>
+    <label>ID compartido del espacio
+      <input id="workspaceInput" type="text" autocomplete="off">
+    </label>
+    <p class="hint">En modo prueba, cualquier persona con el enlace del sitio puede modificar este tablero. Es adecuado solo para esta organización de juego.</p>
+    <div class="dialog-actions">
+      <button value="cancel" type="button" id="closeSyncBtn">Cerrar</button>
+      <button type="button" id="disconnectBtn">Desconectar nube</button>
+      <button class="primary" type="button" id="connectBtn">Conectar y sincronizar</button>
+    </div>
+    <p id="syncMessage" class="save-note" aria-live="polite"></p>
+  </form>
+</dialog>
+<script type="module" src="app.js"></script>
+</body>
+</html>
