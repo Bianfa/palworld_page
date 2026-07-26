@@ -1,0 +1,63 @@
+function renderTaskRows(rows) {
+  return rows.map(t => `<tr>
+    <td>${prioritySelect(t.priority,"tasks",t.id)}</td>
+    <td>${staticOrInput(t.area,"tasks",t.id,"area")}</td>
+    <td>${staticOrInput(t.type,"tasks",t.id,"type")}</td>
+    <td><strong>${staticOrInput(t.item,"tasks",t.id,"item")}</strong></td>
+    <td>${staticOrInput(t.pal_no,"tasks",t.id,"pal_no")}</td>
+    <td>${input(t.qty_target,"tasks",t.id,"qty_target","number")}</td>
+    <td>${input(t.qty_current ?? 0,"tasks",t.id,"qty_current","number")}</td>
+    <td>${statusButton(t.status,"tasks",t.id)}</td>
+    <td>${staticOrArea(t.notes,"tasks",t.id,"notes")}</td>
+    <td class="row-actions">${deleteBtn("tasks",t.id)}</td>
+  </tr>`).join("");
+}
+function renderPalRows(rows) {
+  return rows.map(p => `<tr>
+    <td>${prioritySelect(p.priority,"pal_rosters",p.id)}</td>
+    <td>${staticOrInput(p.role,"pal_rosters",p.id,"role")}</td>
+    <td><strong>${staticOrInput(p.pal,"pal_rosters",p.id,"pal")}</strong></td>
+    <td>${staticOrInput(p.number,"pal_rosters",p.id,"number")}</td>
+    <td>${input(p.qty,"pal_rosters",p.id,"qty","number")}</td>
+    <td>${input(p.qty_current ?? 0,"pal_rosters",p.id,"qty_current","number")}</td>
+    <td>${statusButton(p.status,"pal_rosters",p.id)}</td>
+    <td>${staticOrArea(p.work,"pal_rosters",p.id,"work")}</td>
+    <td>${staticOrInput(p.aura,"pal_rosters",p.id,"aura")}</td>
+    <td>${staticOrArea(p.passives,"pal_rosters",p.id,"passives")}</td>
+    <td>${staticOrArea(p.notes,"pal_rosters",p.id,"notes")}</td>
+    <td>${deleteBtn("pal_rosters",p.id)}</td>
+  </tr>`).join("");
+}
+function renderProductionRows(rows) {
+  return rows.map(p => `<tr>
+    <td>${prioritySelect(p.priority,"production",p.id)}</td>
+    <td><strong>${staticOrInput(p.product,"production",p.id,"product")}</strong></td>
+    <td>${staticOrInput(p.target,"production",p.id,"target")}</td>
+    <td>${staticOrArea(p.criteria,"production",p.id,"criteria")}</td>
+    <td>${statusButton(p.status,"production",p.id)}</td>
+    <td>${deleteBtn("production",p.id)}</td>
+  </tr>`).join("");
+}
+function renderBases() {
+  $("#panels").innerHTML = store.bases.map(b => {
+    const tasks = store.tasks.filter(t=>Number(t.base)===Number(b.id));
+    const pals = store.pal_rosters.filter(p=>Number(p.base)===Number(b.id));
+    const production = store.production.filter(p=>Number(p.base)===Number(b.id));
+    const done = tasks.filter(t=>t.status==="OK").length;
+    const pct = tasks.length ? Math.round(done*100/tasks.length) : 0;
+    const palTotal = pals.reduce((s,p)=>s+Number(p.qty||0),0);
+    return `<article class="panel ${b.id===activeBase?"active":""}" id="base-${b.id}">
+      <div class="card"><h2>Base ${b.id}: ${esc(b.name)}</h2>${baseEditor(b)}<div class="progress"><span style="width:${pct}%"></span></div><small>${done}/${tasks.length} tareas · ${palTotal} Pals objetivo</small></div>
+      <div class="card"><div class="section-head"><h3>Checklist de construcción y configuración</h3><button class="small edit-only" data-action="add-row" data-collection="tasks" data-base="${b.id}">Agregar tarea</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Prio.</th><th>Área</th><th>Tipo</th><th>Elemento / Pal</th><th>N.º</th><th>Meta</th><th>Actual</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>${renderTaskRows(tasks)}</tbody></table></div></div>
+      <div class="card"><div class="section-head"><h3>Plantilla de Pals (${palTotal}/35)</h3><button class="small edit-only" data-action="add-row" data-collection="pal_rosters" data-base="${b.id}">Agregar Pal</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Prio.</th><th>Rol</th><th>Pal</th><th>N.º</th><th>Meta</th><th>Actual</th><th>Estado</th><th>Trabajo</th><th>Aura</th><th>Pasivas</th><th>Uso</th><th></th></tr></thead><tbody>${renderPalRows(pals)}</tbody></table></div></div>
+      <div class="card"><div class="section-head"><h3>Prioridad de producción</h3><button class="small edit-only" data-action="add-row" data-collection="production" data-base="${b.id}">Agregar objetivo</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Prio.</th><th>Objetivo</th><th>Meta</th><th>Criterio</th><th>Estado</th><th></th></tr></thead><tbody>${renderProductionRows(production)}</tbody></table></div></div>
+    </article>`;
+  }).join("");
+}
+function renderBreeding() {
+  const rows = store.breeding.map(r => `<tr>
+    <td>${staticOrInput(r.order,"breeding",r.id,"order","number")}</td>
+    <td><strong>${staticOrInput(r.target,"breeding",r.id,"target")}</strong></td>
