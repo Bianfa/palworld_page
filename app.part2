@@ -1,0 +1,64 @@
+    return fresh;
+  }
+  const deletedIds = { ...fresh.meta.deletedIds, ...(saved.meta?.deletedIds || {}) };
+  fresh.bases = mergeRows(DEFAULT_DATA.bases, saved.bases, []);
+  for (const key of ["tasks","pal_rosters","production","breeding"]) {
+    fresh[key] = mergeRows(DEFAULT_DATA[key], saved[key], deletedIds[key]);
+  }
+  if (saved.sources && typeof saved.sources === "object") fresh.sources = { ...fresh.sources, ...saved.sources };
+  fresh.meta = { ...fresh.meta, ...(saved.meta || {}), deletedIds };
+  fresh.schemaVersion = 3;
+  fresh.appVersion = APP_VERSION;
+  return fresh;
+}
+let store;
+try { store = normalize(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")); } catch { store = defaultStore(); }
+
+function save({cloud=true, message="Cambios guardados localmente."}={}) {
+  store.appVersion = APP_VERSION;
+  store.meta.updatedAt = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  revision += 1;
+  $("#saveNote").textContent = message;
+  updateMetrics();
+  if (cloud && syncReady && sync) scheduleCloudSave();
+}
+function scheduleCloudSave() {
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(async () => {
+    const payloadJson = JSON.stringify(store);
+    if (payloadJson === lastPayloadJson) return;
+    try { await sync.push(clone(store), revision); lastPayloadJson = payloadJson; }
+    catch (e) { setSyncStatus("error", e.message); }
+  }, 700);
+}
+function setSyncStatus(kind, text) {
+  const pill = $("#syncPill");
+  pill.textContent = text;
+  pill.className = `sync-pill ${kind === "online" ? "online" : kind === "error" ? "error" : ""}`;
+  $("#syncMessage").textContent = text;
+}
+function getFirebaseSaved() { try { return JSON.parse(localStorage.getItem(FIREBASE_KEY) || "null"); } catch { return null; } }
+function randomWorkspace() { return DEFAULT_WORKSPACE_ID; }
+
+function statusButton(status, collection, id) { return `<button class="status-btn ${status === "OK" ? "ok" : "no"}" data-action="toggle-status" data-collection="${collection}" data-id="${esc(id)}">${status || "NO"}</button>`; }
+function prioritySelect(value, collection, id) { return `<select class="edit-field" data-field="priority" data-collection="${collection}" data-id="${esc(id)}"><option ${value==="P0"?"selected":""}>P0</option><option ${value==="P1"?"selected":""}>P1</option><option ${value==="P2"?"selected":""}>P2</option></select>`; }
+function input(value, collection, id, field, type="text") { return `<input class="edit-field" type="${type}" value="${esc(value)}" data-field="${field}" data-collection="${collection}" data-id="${esc(id)}">`; }
+function area(value, collection, id, field) { return `<textarea class="edit-field" data-field="${field}" data-collection="${collection}" data-id="${esc(id)}">${esc(value)}</textarea>`; }
+function staticOrInput(value, collection, id, field, type="text") { return editMode ? input(value,collection,id,field,type) : `<span class="field-static">${esc(value)}</span>`; }
+function staticOrArea(value, collection, id, field) { return editMode ? area(value,collection,id,field) : `<span class="field-static">${esc(value)}</span>`; }
+function deleteBtn(collection,id) { return `<button class="small danger edit-only" data-action="delete-row" data-collection="${collection}" data-id="${esc(id)}">Eliminar</button>`; }
+
+function renderTabs() {
+  $("#tabs").innerHTML = store.bases.map(b => `<button class="tab ${b.id===activeBase?"active":""}" data-action="open-base" data-base="${b.id}">${b.id}. ${esc(b.short)}</button>`).join("");
+}
+function baseEditor(b) {
+  if (!editMode) return `<div class="grid"><div><strong>Objetivo</strong><p>${esc(b.purpose)}</p></div><div><strong>Estado actual</strong><p>${esc(b.current)}</p></div></div><p class="note"><strong>Decisión principal:</strong> ${esc(b.priority)}</p>`;
+  return `<div class="base-editor">
+    <label>Nombre${input(b.name,"bases",b.id,"name")}</label>
+    <label>Nombre corto${input(b.short,"bases",b.id,"short")}</label>
+    <label class="wide">Objetivo${area(b.purpose,"bases",b.id,"purpose")}</label>
+    <label class="wide">Estado actual${area(b.current,"bases",b.id,"current")}</label>
+    <label class="wide">Decisión principal${area(b.priority,"bases",b.id,"priority")}</label>
+  </div>`;
+}
