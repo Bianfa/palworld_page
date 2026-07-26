@@ -55,7 +55,8 @@
 
     const finalHtml = html
       .replace(/<link[^>]+href=["']styles\.css["'][^>]*>/i, `<style>${css}</style>`)
-      .replace(/<script[^>]+src=["']app\.js["'][^>]*><\/script>/i, `<script type="module" src="${appUrl}"><\/script>`);
+      .replace(/<script[^>]+src=["']app\.js["'][^>]*><\/script>/i, `<script type="module" src="${appUrl}"><\/script>`)
+      .replace(/<\/body>/i, `<script src="palworld-checklist-v22.js?v=2.2.0"><\/script><\/body>`);
 
     document.open();
     document.write(finalHtml);
