@@ -23,11 +23,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Extract site
+      - name: Rebuild site package
         run: |
+          cat site.b64.* | base64 --decode > site-current.zip
+          unzip -t site-current.zip
           rm -rf _site
           mkdir -p _site
-          unzip -q site.zip -d _site
+          unzip -q site-current.zip -d _site
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload site
