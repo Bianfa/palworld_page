@@ -1,0 +1,64 @@
+    <td>${staticOrInput(r.number,"breeding",r.id,"number")}</td>
+    <td>${staticOrInput(r.destination,"breeding",r.id,"destination")}</td>
+    <td>${input(r.qty,"breeding",r.id,"qty","number")}</td>
+    <td>${staticOrArea(r.purpose,"breeding",r.id,"purpose")}</td>
+    <td>${staticOrArea(r.passives,"breeding",r.id,"passives")}</td>
+    <td>${staticOrInput(r.cake,"breeding",r.id,"cake")}</td>
+    <td>${staticOrInput(r.parent_a,"breeding",r.id,"parent_a")} ${editMode?"+":""} ${staticOrInput(r.parent_b,"breeding",r.id,"parent_b")}</td>
+    <td>${statusButton(r.status,"breeding",r.id)}</td>
+    <td>${staticOrArea(r.notes,"breeding",r.id,"notes")}</td>
+    <td>${deleteBtn("breeding",r.id)}</td>
+  </tr>`).join("");
+  $("#breedingPanel").innerHTML = `<div class="section-head"><h2>Cola maestra de crianza</h2><button class="small edit-only" data-action="add-row" data-collection="breeding">Agregar proyecto</button></div><p class="note">El criadero es exclusivo: 12 parejas iniciales (24 Pals). Los pasteles llegan desde la base 3.</p><div class="table-wrap"><table><thead><tr><th>#</th><th>Objetivo</th><th>N.º</th><th>Destino</th><th>Meta</th><th>Función</th><th>Pasivas</th><th>Pastel</th><th>Progenitores</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function renderSources() {
+  $("#sourcesPanel").innerHTML = `<h2>Fuentes de referencia</h2>${Object.entries(store.sources||{}).map(([k,v])=>`<p><strong>${esc(k)}:</strong> <a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a></p>`).join("")}`;
+}
+function updateMetrics() {
+  const all = [...store.tasks,...store.pal_rosters,...store.production,...store.breeding];
+  const done = all.filter(r=>r.status==="OK").length;
+  const pct = all.length ? Math.round(done*100/all.length) : 0;
+  $("#globalDone").textContent = done;
+  $("#globalTotal").textContent = all.length;
+  $("#globalPct").textContent = `${pct}%`;
+  $("#globalBar").style.width = `${pct}%`;
+}
+function renderAll() {
+  document.body.classList.toggle("editing",editMode);
+  $("#editBtn").textContent = editMode ? "Cerrar edición" : "Activar edición";
+  renderTabs(); renderBases(); renderBreeding(); renderSources(); updateMetrics();
+}
+function findRow(collection,id) {
+  if (collection === "bases") return store.bases.find(r=>String(r.id)===String(id));
+  return store[collection]?.find(r=>String(r.id)===String(id));
+}
+function updateField(el) {
+  const {collection,id,field} = el.dataset;
+  const row = findRow(collection,id);
+  if (!row) return;
+  let value = el.value;
+  if (el.type === "number") value = Number(value || 0);
+  row[field] = value;
+  if (collection === "bases" && field === "short") store.tasks.filter(t=>Number(t.base)===Number(id)).forEach(t=>t.base_name=value);
+  save();
+}
+function addRow(collection,base) {
+  if (collection === "tasks") store.tasks.push({id:uid(`B${base}`),base:Number(base),base_name:store.bases.find(b=>b.id===Number(base))?.short||"",area:"Nueva área",type:"Construir",priority:"P1",item:"Nuevo elemento",pal_no:"",qty_target:1,qty_current:0,status:"NO",notes:"",source:""});
+  if (collection === "pal_rosters") store.pal_rosters.push({id:uid("PAL"),base:Number(base),role:"Nuevo rol",pal:"Nuevo Pal",number:"#",qty:1,qty_current:0,work:"",aura:"No",priority:"P1",passives:"",status:"NO",notes:""});
+  if (collection === "production") store.production.push({id:uid("PROD"),base:Number(base),product:"Nuevo objetivo",priority:"P1",target:"",criteria:"",status:"NO"});
+  if (collection === "breeding") store.breeding.push({id:uid("BREED"),order:store.breeding.length+1,target:"Nuevo objetivo",number:"#",destination:"",qty:1,purpose:"",passives:"",cake:"Pastel normal",parent_a:"",parent_b:"",status:"NO",notes:""});
+  save(); renderAll();
+}
+function deleteRow(collection,id) {
+  if (!confirm("¿Eliminar esta fila?")) return;
+  store.meta.deletedIds ||= { tasks: [], pal_rosters: [], production: [], breeding: [] };
+  store.meta.deletedIds[collection] ||= [];
+  if (!store.meta.deletedIds[collection].includes(String(id))) store.meta.deletedIds[collection].push(String(id));
+  store[collection] = store[collection].filter(r=>String(r.id)!==String(id));
+  save(); renderAll();
+}
+function exportBackup() {
+  const packageData = { exportedAt:new Date().toISOString(), appVersion:APP_VERSION, firebaseProject:FIREBASE_CONFIG.projectId, workspace:getFirebaseSaved()?.workspaceId||null, data:store };
+  const blob = new Blob([JSON.stringify(packageData,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`palworld_bases_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+}
