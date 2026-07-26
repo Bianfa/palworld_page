@@ -1,0 +1,63 @@
+const DEFAULT_DATA = JSON.parse((await Promise.all(["data.part1","data.part2","data.part3","data.part4","data.part5"].map(async (name) => { const response = await fetch(name, {cache:"no-store"}); if (!response.ok) throw new Error(`No se pudo cargar ${name}`); return response.text(); }))).join(""));
+const APP_VERSION = "2.1.0";
+const FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyAHZOymzudoB6LnKAiMgDnjEX7wseRsgZ8",
+  authDomain: "palgremio.firebaseapp.com",
+  projectId: "palgremio",
+  storageBucket: "palgremio.firebasestorage.app",
+  messagingSenderId: "389872031786",
+  appId: "1:389872031786:web:284580576b948b77764b53"
+});
+const STORAGE_KEY = "palworld-bases-workspace-v2";
+const FIREBASE_KEY = "palworld-bases-firebase-v2";
+const DEFAULT_WORKSPACE_ID = "palgremio-tarde-juegos-2026";
+const CLIENT_KEY = "palworld-bases-client-id";
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+const clone = (v) => JSON.parse(JSON.stringify(v));
+const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+const clientId = localStorage.getItem(CLIENT_KEY) || crypto.randomUUID();
+localStorage.setItem(CLIENT_KEY, clientId);
+let editMode = false;
+let activeBase = 1;
+let sync = null;
+let syncReady = false;
+let remoteInitialized = false;
+let revision = 0;
+let cloudTimer = null;
+let lastPayloadJson = "";
+
+function defaultStore() {
+  return {
+    schemaVersion: 3,
+    appVersion: APP_VERSION,
+    ...clone(DEFAULT_DATA),
+    meta: {
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deletedIds: { tasks: [], pal_rosters: [], production: [], breeding: [] }
+    }
+  };
+}
+function mergeRows(defaultRows, savedRows, deletedIds = []) {
+  const deleted = new Set((deletedIds || []).map(String));
+  const savedMap = new Map((savedRows || []).filter(Boolean).map(row => [String(row.id ?? row.order), row]));
+  const merged = [];
+  for (const baseRow of defaultRows || []) {
+    const key = String(baseRow.id ?? baseRow.order);
+    if (deleted.has(key)) continue;
+    merged.push(savedMap.has(key) ? { ...baseRow, ...savedMap.get(key) } : clone(baseRow));
+    savedMap.delete(key);
+  }
+  for (const row of savedMap.values()) {
+    const key = String(row.id ?? row.order);
+    if (!deleted.has(key)) merged.push(row);
+  }
+  return merged;
+}
+function normalize(saved) {
+  const fresh = defaultStore();
+  if (!saved || typeof saved !== "object") return fresh;
+  if (!saved.bases && saved.tasks && !Array.isArray(saved.tasks)) {
+    Object.entries(saved.tasks).forEach(([id,status]) => { const row=fresh.tasks.find(t=>t.id===id); if(row) row.status=status; });
+    Object.entries(saved.breeding || {}).forEach(([order,status]) => { const row=fresh.breeding.find(t=>String(t.order)===String(order)); if(row) row.status=status; });
