@@ -1,0 +1,184 @@
+
+// ===== Mejoras operativas v3.1 =====
+const V31_VERSION = "3.1.0";
+const V31_CONDENSATION_PRESETS = Object.freeze({0:1,1:5,2:13,3:25,4:49});
+const V31_STAGE_OPTIONS = ["Pendiente","Buscando progenitores","Criando","Listo","Asignado a base"];
+const v31OriginalRenderBases = renderBases;
+const v31OriginalRenderAll = renderAll;
+const v31OriginalUpdateField = updateField;
+let v31HistoryBaseline = null;
+
+function v31EnsureStore() {
+  store.schemaVersion = Math.max(Number(store.schemaVersion || 0), 5);
+  store.appVersion = V31_VERSION;
+  store.pal_inventory ||= {};
+  store.change_history ||= [];
+  store.settings = {
+    show_completed_breeding: false,
+    ...store.settings
+  };
+  store.breeding_profiles ||= [];
+  for (const profile of store.breeding_profiles) {
+    profile.stage ||= "Pendiente";
+    profile.condensation_stars = Math.max(0, Math.min(4, Number(profile.condensation_stars || 0)));
+    profile.copies_per_worker = Math.max(1, Number(profile.copies_per_worker || V31_CONDENSATION_PRESETS[profile.condensation_stars] || 1));
+    profile.condensation_fodder_current = Math.max(0, Number(profile.condensation_fodder_current || 0));
+  }
+  const grouped = new Map();
+  for (const task of store.tasks.filter(t => inferTaskCategory(t) === "Pals")) {
+    const key = profileKey(task.pal_no, task.item);
+    if (!key) continue;
+    grouped.set(key, (grouped.get(key) || 0) + Number(task.qty_current || 0));
+  }
+  for (const [key, assigned] of grouped) {
+    if (store.pal_inventory[key] === undefined) store.pal_inventory[key] = assigned;
+  }
+}
+
+function v31Comparable(value) {
+  return clone({
+    bases: value.bases || [],
+    tasks: value.tasks || [],
+    inventory: value.inventory || {},
+    pal_inventory: value.pal_inventory || {},
+    breeding_profiles: value.breeding_profiles || []
+  });
+}
+
+const V31_FIELD_LABELS = {
+  name:"Nombre", short:"Nombre corto", purpose:"Objetivo", current:"Estado actual", priority:"Prioridad",
+  category:"Categoría", item:"Elemento/Pal", type:"Tipo/función", pal_no:"Número", qty_target:"Meta",
+  qty_current:"Actual", status:"Estado", notes:"Notas", catalog_id:"Vínculo de catálogo", passives:"Pasivas",
+  cake:"Pastel", parent_a:"Progenitor A", parent_b:"Progenitor B", stage:"Etapa de crianza",
+  condensation_stars:"Condensación objetivo", copies_per_worker:"Copias por trabajador",
+  condensation_fodder_current:"Copias de condensación disponibles"
+};
+function v31Text(value) {
+  if (value === undefined || value === null || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+function v31RowLabel(collection,row) {
+  if (collection === "bases") return `Base ${row.id}: ${row.short || row.name}`;
+  if (collection === "tasks") return `${row.item || "Ítem"} · Base ${row.base || "?"}`;
+  if (collection === "breeding_profiles") return `Crianza: ${row.target || row.number || row.key}`;
+  return row.name || row.id || "Registro";
+}
+function v31PushHistory(change) {
+  const list = store.change_history ||= [];
+  const now = Date.now();
+  const previous = list[list.length - 1];
+  if (previous && previous.key === change.key && now - Number(previous.timestamp || 0) < 120000) {
+    previous.after = change.after;
+    previous.at = new Date(now).toISOString();
+    previous.timestamp = now;
+    return;
+  }
+  list.push({id:uid("HIST"),at:new Date(now).toISOString(),timestamp:now,...change});
+  if (list.length > 500) list.splice(0,list.length - 500);
+}
+function v31CompareRows(collection,beforeRows=[],afterRows=[]) {
+  const beforeMap = new Map(beforeRows.map(row => [String(row.id ?? row.order ?? row.key),row]));
+  const afterMap = new Map(afterRows.map(row => [String(row.id ?? row.order ?? row.key),row]));
+  const ignored = new Set(["source","base_name"]);
+  for (const [id,row] of afterMap) {
+    const before = beforeMap.get(id);
+    if (!before) {
+      v31PushHistory({key:`${collection}:${id}:added`,scope:collection,label:v31RowLabel(collection,row),field:"Registro",before:"—",after:"Agregado"});
+      continue;
+    }
+    for (const field of new Set([...Object.keys(before),...Object.keys(row)])) {
+      if (ignored.has(field) || field === "id" || field === "order" || field === "key") continue;
+      const a = JSON.stringify(before[field] ?? null), b = JSON.stringify(row[field] ?? null);
+      if (a === b) continue;
+      v31PushHistory({
+        key:`${collection}:${id}:${field}`, scope:collection, label:v31RowLabel(collection,row),
+        field:V31_FIELD_LABELS[field] || field, before:v31Text(before[field]), after:v31Text(row[field])
+      });
+    }
+  }
+  for (const [id,row] of beforeMap) if (!afterMap.has(id)) {
+    v31PushHistory({key:`${collection}:${id}:deleted`,scope:collection,label:v31RowLabel(collection,row),field:"Registro",before:"Existía",after:"Eliminado"});
+  }
+}
+function v31CompareMaps(scope,label,before={},after={}) {
+  for (const key of new Set([...Object.keys(before),...Object.keys(after)])) {
+    if (Number(before[key] || 0) === Number(after[key] || 0)) continue;
+    v31PushHistory({key:`${scope}:${key}`,scope,label:`${label}: ${itemById(key)?.name || key}`,field:"Cantidad",before:v31Text(before[key] || 0),after:v31Text(after[key] || 0)});
+  }
+}
+function v31RecordChanges(before,after) {
+  if (!before) return;
+  v31CompareRows("bases",before.bases,after.bases);
+  v31CompareRows("tasks",before.tasks,after.tasks);
+  v31CompareRows("breeding_profiles",before.breeding_profiles,after.breeding_profiles);
+  v31CompareMaps("inventory","Stock",before.inventory,after.inventory);
+  for (const key of new Set([...Object.keys(before.pal_inventory || {}),...Object.keys(after.pal_inventory || {})])) {
+    if (Number(before.pal_inventory?.[key] || 0) === Number(after.pal_inventory?.[key] || 0)) continue;
+    const profile=(store.breeding_profiles||[]).find(p=>p.key===key);
+    v31PushHistory({key:`pal_inventory:${key}`,scope:"pal_inventory",label:`Pals disponibles: ${profile?.target || key}`,field:"Cantidad global",before:v31Text(before.pal_inventory?.[key] || 0),after:v31Text(after.pal_inventory?.[key] || 0)});
+  }
+}
+
+save = function({cloud=true,message="Cambios guardados localmente.",history=true}={}) {
+  v31EnsureStore();
+  const comparable = v31Comparable(store);
+  if (history) v31RecordChanges(v31HistoryBaseline, comparable);
+  store.appVersion = V31_VERSION;
+  store.meta.updatedAt = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(store));
+  revision += 1;
+  if ($("#saveNote")) $("#saveNote").textContent = message;
+  updateMetrics();
+  if (cloud && syncReady && sync) scheduleCloudSave();
+  v31HistoryBaseline = v31Comparable(store);
+};
+
+function v31CondensationCopies(profile) {
+  const stars=Math.max(0,Math.min(4,Number(profile.condensation_stars||0)));
+  return Math.max(1,Number(profile.copies_per_worker || V31_CONDENSATION_PRESETS[stars] || 1));
+}
+function v31BreedingStage(row) {
+  if (row.assignedCurrent >= row.target && row.missingWorkers === 0 && row.missingFodder === 0) return "Asignado a base";
+  if (row.missingWorkers === 0 && row.missingFodder === 0) return "Listo";
+  return V31_STAGE_OPTIONS.includes(row.profile.stage) ? row.profile.stage : "Pendiente";
+}
+function v31DeriveBreedingQueue() {
+  v31EnsureStore();
+  const groups=new Map();
+  for (const task of store.tasks.filter(t=>inferTaskCategory(t)==="Pals")) {
+    const key=profileKey(task.pal_no,task.item); if(!key)continue;
+    const row=groups.get(key)||{key,name:task.item,number:task.pal_no||"",target:0,assignedCurrent:0,distributions:[],roles:new Set(),priorities:[]};
+    const target=Math.max(0,Number(task.qty_target||0)), current=Math.max(0,Number(task.qty_current||0));
+    row.target+=target; row.assignedCurrent+=current;
+    const base=store.bases.find(b=>Number(b.id)===Number(task.base));
+    row.distributions.push({taskId:task.id,baseId:Number(task.base),base:base?.short||`Base ${task.base}`,target,current,deficit:Math.max(0,target-current),priority:task.priority||"P2"});
+    if(task.type)row.roles.add(task.type); if(task.notes)row.roles.add(task.notes);
+    row.priorities.push(task.priority||"P2"); if(!row.number&&task.pal_no)row.number=task.pal_no;
+    groups.set(key,row);
+  }
+  const order={P0:0,P1:1,P2:2};
+  return [...groups.values()].map(row=>{
+    row.profile=findBreedingProfile(row.number,row.name);
+    row.profile.stage ||= "Pendiente";
+    row.profile.condensation_stars=Math.max(0,Math.min(4,Number(row.profile.condensation_stars||0)));
+    row.profile.copies_per_worker=v31CondensationCopies(row.profile);
+    row.profile.condensation_fodder_current=Math.max(0,Number(row.profile.condensation_fodder_current||0));
+    row.available=Math.max(0,Number(store.pal_inventory[row.key] ?? row.assignedCurrent));
+    row.unassigned=Math.max(0,row.available-row.assignedCurrent);
+    row.missingWorkers=Math.max(0,row.target-row.available);
+    row.fodderPerWorker=Math.max(0,row.profile.copies_per_worker-1);
+    row.requiredFodder=row.target*row.fodderPerWorker;
+    row.currentFodder=row.profile.condensation_fodder_current;
+    row.missingFodder=Math.max(0,row.requiredFodder-row.currentFodder);
+    row.totalMissing=row.missingWorkers+row.missingFodder;
+    row.priority=[...row.priorities].sort((a,b)=>(order[a]??9)-(order[b]??9))[0]||"P2";
+    row.roles=[...row.roles];
+    row.stage=v31BreedingStage(row);
+    let availableForAllocation=row.available;
+    row.distributions.sort((a,b)=>(order[a.priority]??9)-(order[b.priority]??9)||a.baseId-b.baseId);
+    row.distributions=row.distributions.map(d=>{const proposed=Math.min(d.target,availableForAllocation);availableForAllocation-=proposed;return{...d,proposed,proposedMissing:Math.max(0,d.target-proposed)};});
+    return row;
+  }).sort((a,b)=>(order[a.priority]??9)-(order[b.priority]??9)||b.totalMissing-a.totalMissing||a.name.localeCompare(b.name));
+}
+deriveBreedingQueue = v31DeriveBreedingQueue;
