@@ -1,0 +1,92 @@
+  if (collection === "production") store.production.push({id:uid("PROD"),base:Number(base),product:"Nuevo objetivo",priority:"P1",target:"",criteria:"",status:"NO"});
+  if (collection === "breeding") store.breeding.push({id:uid("BREED"),order:store.breeding.length+1,target:"Nuevo objetivo",number:"#",destination:"",qty:1,purpose:"",passives:"",cake:"Pastel normal",parent_a:"",parent_b:"",status:"NO",notes:""});
+  save(); renderAll();
+}
+function deleteRow(collection,id) {
+  if (!confirm("¿Eliminar esta fila?")) return;
+  store.meta.deletedIds ||= { tasks: [], pal_rosters: [], production: [], breeding: [] };
+  store.meta.deletedIds[collection] ||= [];
+  if (!store.meta.deletedIds[collection].includes(String(id))) store.meta.deletedIds[collection].push(String(id));
+  store[collection] = store[collection].filter(r=>String(r.id)!==String(id));
+  save(); renderAll();
+}
+function exportBackup() {
+  const packageData = { exportedAt:new Date().toISOString(), appVersion:APP_VERSION, firebaseProject:FIREBASE_CONFIG.projectId, workspace:getFirebaseSaved()?.workspaceId||null, data:store };
+  const blob = new Blob([JSON.stringify(packageData,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`palworld_bases_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+}
+async function importBackup(file) {
+  try {
+    const parsed=JSON.parse(await file.text()); store=normalize(parsed.data||parsed); save(); renderAll();
+  } catch { alert("El archivo no es un respaldo válido."); }
+}
+async function connectCloud() {
+  const config = FIREBASE_CONFIG;
+  const workspaceId=$("#workspaceInput").value.trim();
+  try {
+    const mod=await import("./firebase-sync.js");
+    syncReady=false; remoteInitialized=false;
+    sync=await mod.connectFirebaseSync({config,workspaceId,clientId,
+      onStatus:(kind,text)=>setSyncStatus(kind,text),
+      onRemote:async(remote,meta)=>{
+        if (!remoteInitialized) {
+          remoteInitialized=true;
+          if (!remote?.payload) { syncReady=true; await sync.push(clone(store),++revision); lastPayloadJson=JSON.stringify(store); return; }
+          const remoteJson=JSON.stringify(remote.payload);
+          const localJson=JSON.stringify(store);
+          if (remoteJson!==localJson) {
+            const load=confirm("Ya existen datos sincronizados. Aceptar carga la nube; Cancelar conserva este dispositivo y reemplaza la nube.");
+            if (load) { store=normalize(remote.payload); localStorage.setItem(STORAGE_KEY,JSON.stringify(store)); lastPayloadJson=JSON.stringify(store); renderAll(); }
+            else { syncReady=true; await sync.push(clone(store),++revision); lastPayloadJson=JSON.stringify(store); }
+          } else lastPayloadJson=remoteJson;
+          syncReady=true; setSyncStatus("online","Sincronizado"); return;
+        }
+        if (meta.pendingWrites || !remote?.payload) return;
+        const remoteJson=JSON.stringify(remote.payload);
+        if (remoteJson!==JSON.stringify(store)) { store=normalize(remote.payload); localStorage.setItem(STORAGE_KEY,JSON.stringify(store)); lastPayloadJson=remoteJson; renderAll(); $("#saveNote").textContent="Cambios recibidos desde otro dispositivo."; }
+      }
+    });
+    localStorage.setItem(FIREBASE_KEY,JSON.stringify({workspaceId}));
+    syncReady=true; setSyncStatus("online","Sincronizado");
+  } catch(e) { setSyncStatus("error",e.message); }
+}
+function disconnectCloud() { syncReady=false; sync?.disconnect?.(); sync=null; localStorage.removeItem(FIREBASE_KEY); setSyncStatus("local","Solo local"); }
+
+// Events
+document.addEventListener("click",(e)=>{
+  const el=e.target.closest("[data-action]"); if(!el)return;
+  const a=el.dataset.action;
+  if(a==="open-base"){activeBase=Number(el.dataset.base);renderAll();}
+  if(a==="toggle-status"){const r=findRow(el.dataset.collection,el.dataset.id);if(r){r.status=r.status==="OK"?"NO":"OK";save();renderAll();}}
+  if(a==="add-row")addRow(el.dataset.collection,el.dataset.base,el.dataset.category);
+  if(a==="delete-row")deleteRow(el.dataset.collection,el.dataset.id);
+  if(a==="open-catalog"){ $("#catalogDialog").showModal(); renderCatalog(); }
+  if(a==="catalog-add")addCatalogEntry(el.dataset.kind,el.dataset.catalogId,$("#catalogBase").value);
+});
+document.addEventListener("input",(e)=>{if(e.target.matches("[data-field]") && !["SELECT","INPUT"].includes(e.target.tagName)){updateField(e.target);}});
+document.addEventListener("change",(e)=>{
+  if(e.target.matches("[data-field]")){updateField(e.target);if(e.target.tagName==="SELECT" || e.target.type==="number") renderAll();}
+  if(e.target.matches(".inventory-field")){store.inventory ||= {}; store.inventory[e.target.dataset.itemId]=Number(e.target.value||0); save(); renderMaterials();}
+  if(e.target.matches(".catalog-link")){const t=findRow("tasks",e.target.dataset.taskId);if(t){t.catalog_type=e.target.value?"structure":"";t.catalog_id=e.target.value;const s=catalogById("structure",e.target.value);if(s){t.item=s.name;t.source=s.source||t.source;}save();renderAll();}}
+});
+$("#editBtn").addEventListener("click",()=>{editMode=!editMode;renderAll();});
+$("#exportBtn").addEventListener("click",exportBackup);
+$("#importBtn").addEventListener("click",()=>$("#importFile").click());
+$("#importFile").addEventListener("change",e=>{if(e.target.files[0])importBackup(e.target.files[0]);e.target.value="";});
+$("#printBtn").addEventListener("click",()=>window.print());
+$("#syncBtn").addEventListener("click",()=>{const saved=getFirebaseSaved();$("#workspaceInput").value=saved?.workspaceId||DEFAULT_WORKSPACE_ID;$("#syncDialog").showModal();});
+$("#catalogBtn").addEventListener("click",()=>{$("#catalogDialog").showModal();renderCatalog();});
+$("#closeCatalogBtn").addEventListener("click",()=>$("#catalogDialog").close());
+$("#catalogKind").addEventListener("change",renderCatalog);
+$("#catalogSearch").addEventListener("input",renderCatalog);
+$("#catalogImport").addEventListener("change",async e=>{if(e.target.files[0])await importCatalogFile(e.target.files[0]);e.target.value="";});
+$("#closeSyncBtn").addEventListener("click",()=>$("#syncDialog").close());
+$("#connectBtn").addEventListener("click",connectCloud);
+$("#disconnectBtn").addEventListener("click",disconnectCloud);
+
+$("#catalogBase").innerHTML=store.bases.map(b=>`<option value="${b.id}">${b.id}. ${esc(b.short)}</option>`).join("");
+renderAll();
+const savedFirebase=getFirebaseSaved() || {workspaceId:DEFAULT_WORKSPACE_ID};
+localStorage.setItem(FIREBASE_KEY,JSON.stringify(savedFirebase));
+$("#workspaceInput").value=savedFirebase.workspaceId;
+connectCloud();
