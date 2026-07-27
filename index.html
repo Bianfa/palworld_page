@@ -2,14 +2,14 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#101828">
   <title>PalGremio · Plan de Bases</title>
-  <link rel="stylesheet" href="styles-v4.css?v=4.0.1">
+  <link rel="stylesheet" href="styles-v4.css?v=4.0.2">
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Navegación principal">
       <div class="brand">
         <div class="brand-mark">PG</div>
         <div><strong>PalGremio</strong><span>Plan de bases</span></div>
@@ -26,20 +26,23 @@
         <div><strong id="syncText">Iniciando…</strong><span id="syncSubtext">Preparando tablero</span></div>
       </div>
     </aside>
+    <button id="navBackdrop" class="nav-backdrop" type="button" aria-label="Cerrar menú"></button>
 
     <div class="workspace">
       <header class="topbar">
-        <div>
-          <button id="mobileMenuBtn" class="icon-btn mobile-only" type="button" aria-label="Abrir menú">☰</button>
-          <p class="eyebrow">PARQUE CENTRAL · PALWORLD</p>
-          <h1 id="pageTitle">Resumen operativo</h1>
+        <div class="title-group">
+          <button id="mobileMenuBtn" class="icon-btn mobile-only" type="button" aria-label="Abrir menú" aria-expanded="false">☰</button>
+          <div>
+            <p class="eyebrow">PARQUE CENTRAL · PALWORLD</p>
+            <h1 id="pageTitle">Resumen operativo</h1>
+          </div>
         </div>
         <div class="top-actions">
           <label class="search-box">
             <span>⌕</span>
-            <input id="globalSearch" type="search" placeholder="Buscar tarea o Pal…">
+            <input id="globalSearch" type="search" placeholder="Buscar tarea o Pal…" aria-label="Buscar tarea o Pal">
           </label>
-          <button id="newTaskBtn" class="primary-btn" type="button">+ Nueva tarea</button>
+          <button id="newTaskBtn" class="primary-btn" type="button"><span class="desktop-label">+ Nueva tarea</span><span class="mobile-label">+</span></button>
         </div>
       </header>
 
@@ -76,13 +79,13 @@
         <button id="deleteTaskBtn" class="danger-btn hidden" type="button">Eliminar</button>
         <span class="modal-spacer"></span>
         <button id="cancelTaskBtn" class="secondary-btn" type="button">Cancelar</button>
-        <button class="primary-btn" type="submit">Guardar tarea</button>
+        <button class="primary-btn" type="submit">Guardar</button>
       </div>
     </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="fallback-loader-v4.js?v=4.0.1"></script>
-  <script type="module" src="app-v4-loader.js?v=4.0.1"></script>
+  <script src="fallback-loader-v4.js?v=4.0.2"></script>
+  <script type="module" src="app-v4-loader.js?v=4.0.2"></script>
 </body>
 </html>
