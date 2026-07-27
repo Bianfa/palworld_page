@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v6
       - name: Rebuild site package
         run: |
-          cat site.b64.* | base64 --decode > site-current.zip
+          cat site-v3.b64.* | base64 --decode > site-current.zip
           unzip -t site-current.zip
           rm -rf _site
           mkdir -p _site
