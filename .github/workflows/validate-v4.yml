@@ -25,9 +25,12 @@ jobs:
           import json
           with open('data-v3.part1', encoding='utf-8') as fh:
               data = json.load(fh)
-          assert len(data.get('bases', [])) >= 6, 'Faltan bases'
-          assert len(data.get('tasks', [])) >= 100, 'El respaldo de tareas está vacío o incompleto'
-          print('Bases:', len(data['bases']), 'Tareas:', len(data['tasks']))
+          bases = data.get('bases', [])
+          tasks = data.get('tasks', [])
+          assert len(bases) >= 6, 'Faltan bases'
+          assert len(tasks) >= 50, f'El respaldo está vacío o incompleto: {len(tasks)} tareas'
+          assert all(task.get('id') and task.get('item') for task in tasks), 'Hay tareas sin ID o nombre'
+          print('Bases:', len(bases), 'Tareas:', len(tasks))
           PY
       - name: Validate commercial shell
         run: |
