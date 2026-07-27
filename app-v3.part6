@@ -21,7 +21,7 @@ function v31RenderBreeding() {
     <td>${r.target}</td>
     <td><input class="pal-global-field" type="number" min="0" value="${r.available}" data-pal-key="${esc(r.key)}"></td>
     <td class="${r.missingWorkers?"missing":"complete"}">${r.missingWorkers}</td>
-    <td>${v31StarsSelect(r)}<br><small>${r.profile.copies_per_worker} copias totales/Pal</small></td>
+    <td>${v31StarsSelect(r)}${editMode?`<br><label class="copies-per-pal">Copias/Pal ${input(r.profile.copies_per_worker,"breeding_profiles",r.profile.id,"copies_per_worker","number")}</label>`:`<br><small>${r.profile.copies_per_worker} copias totales/Pal</small>`}</td>
     <td>${r.requiredFodder}</td>
     <td><input class="edit-field" type="number" min="0" value="${r.currentFodder}" data-field="condensation_fodder_current" data-collection="breeding_profiles" data-id="${esc(r.profile.id)}"></td>
     <td class="${r.totalMissing?"missing":"complete"}"><strong>${r.totalMissing}</strong><br><small>${r.missingWorkers} titulares + ${r.missingFodder} condensación</small></td>
@@ -34,7 +34,7 @@ function v31RenderBreeding() {
   </tr>`).join("");
   const totalTarget=all.reduce((s,r)=>s+r.target,0), totalAvailable=all.reduce((s,r)=>s+r.available,0), totalMissing=all.reduce((s,r)=>s+r.totalMissing,0);
   $("#breedingPanel").innerHTML=`<div class="section-head"><div><h2>Cola automática de crianza</h2><span class="checklist-help">${totalAvailable}/${totalTarget} trabajadores disponibles · ${pending.length} especies pendientes · ${totalMissing} copias/huevos por obtener</span></div><button id="showCompletedBreedingBtn" type="button">${store.settings.show_completed_breeding?"Ocultar completados":`Ver completados (${completed.length})`}</button></div>
-  <p class="note">Los Pals sin déficit desaparecen automáticamente de la cola. La cantidad global indica cuántos ejemplares útiles tienen; <strong>Distribuir</strong> los asigna entre bases por prioridad. La condensación usa un preset editable por estrellas.</p>
+  <p class="note">Los Pals sin déficit desaparecen automáticamente de la cola. La cantidad global indica cuántos ejemplares útiles tienen; <strong>Distribuir</strong> los asigna entre bases por prioridad. La condensación usa un preset por estrellas y el total de copias también puede ajustarse en modo edición.</p>
   ${visible.length?`<div class="table-wrap"><table class="breeding-table"><thead><tr><th>#</th><th>Pal</th><th>Distribución por base</th><th>Trabajadores</th><th>Disponibles globales</th><th>Faltan trabajadores</th><th>Condensación</th><th>Copias requeridas</th><th>Copias disponibles</th><th>Faltan total</th><th>Prio.</th><th>Etapa</th><th>Asignar</th><th>Pasivas</th><th>Pastel</th><th>Progenitores</th><th>Notas</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="all-complete"><strong>¡Cola completada!</strong><p>No faltan Pals ni copias de condensación para los objetivos actuales.</p></div>`}`;
 }
 renderBreeding = v31RenderBreeding;
@@ -93,7 +93,7 @@ function v31EnsureUI(){
     const style=document.createElement("style");style.id="v31Styles";style.textContent=`
       .capacity-alert{margin-top:12px;padding:10px 12px;border-radius:9px;background:#edf7ee;border:1px solid #a8d5ae}.capacity-alert.warning{background:#fff7e1;border-color:#e3c467}.capacity-alert.danger{background:#ffebe9;border-color:#e3a39c;color:#8b1e18}
       .distribution-cell{min-width:250px}.distribution-chip{display:inline-block;margin:2px;padding:4px 7px;border-radius:999px;background:#edf2f7;font-size:12px}.distribution-chip.ready{background:#e5f5e8}.distribution-chip.pending{background:#fff1d6}
-      .breeding-table input[type=number]{min-width:78px}.breeding-table select{min-width:120px}.completed-row{opacity:.72;background:#f4faf5}.all-complete{text-align:center;padding:30px;border:1px dashed #9dc9a4;border-radius:12px;background:#f3fbf4}
+      .breeding-table input[type=number]{min-width:78px}.breeding-table select{min-width:120px}.copies-per-pal{display:block;font-size:11px}.copies-per-pal input{max-width:88px}.completed-row{opacity:.72;background:#f4faf5}.all-complete{text-align:center;padding:30px;border:1px dashed #9dc9a4;border-radius:12px;background:#f3fbf4}
       .history-list{display:grid;gap:8px;max-height:520px;overflow:auto}.history-entry{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px;border-bottom:1px solid #e3e8ef}.history-entry time{font-size:12px;color:#667085}.history-entry span{display:block;font-size:12px;color:#667085}.history-entry p{margin:3px 0}.history-entry del{color:#9b2c2c}.history-entry ins{color:#237a38;text-decoration:none}
       @media(max-width:700px){.history-entry{grid-template-columns:1fr}.breeding-table{min-width:1500px}}
     `;document.head.appendChild(style);
