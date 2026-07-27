@@ -21,18 +21,18 @@ jobs:
           node --check firebase-store-v4.js
       - name: Validate backup data
         run: |
-          python - <<'PY'
-          import json
-          with open('data-v3.part1', encoding='utf-8') as fh:
-              data = json.load(fh)
-          bases = data.get('bases', [])
-          tasks = data.get('tasks', [])
-          assert len(bases) >= 6, f'Faltan bases: {len(bases)}'
-          assert len(tasks) > 0, 'El respaldo de tareas está vacío'
-          valid = [task for task in tasks if task.get('id') and task.get('item')]
-          assert valid, 'No hay ninguna tarea utilizable'
-          print('Bases:', len(bases), 'Tareas:', len(tasks), 'Tareas válidas:', len(valid))
-          PY
+          node - <<'NODE'
+          const fs = require('fs');
+          const text = fs.readFileSync('data-v3.part1', 'utf8').replace(/^\uFEFF/, '');
+          const data = JSON.parse(text);
+          const bases = Array.isArray(data.bases) ? data.bases : [];
+          const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+          if (bases.length < 6) throw new Error(`Faltan bases: ${bases.length}`);
+          if (!tasks.length) throw new Error('El respaldo de tareas está vacío');
+          const valid = tasks.filter(task => task && task.id && task.item);
+          if (!valid.length) throw new Error('No hay ninguna tarea utilizable');
+          console.log({ bases: bases.length, tasks: tasks.length, valid: valid.length });
+          NODE
       - name: Validate commercial shell
         run: |
           grep -q 'PalGremio' index.html
