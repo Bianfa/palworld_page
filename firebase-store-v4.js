@@ -4,6 +4,15 @@ function cleanId(value) {
   return String(value || crypto.randomUUID()).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
 }
 
+function normalized(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function friendly(error) {
   const code = error?.code || "";
   if (code.includes("permission-denied")) return "Firestore rechazó el acceso. Revisa que la base siga en modo prueba.";
@@ -58,8 +67,8 @@ export async function createCloudStore({ config, workspaceId, clientId, fallback
       ? rootSnap.data().payload.bases
       : fallback?.bases || [];
     await fs.setDoc(workspaceRef, {
-      appVersion: "4.0.0",
-      schemaVersion: 6,
+      appVersion: "4.1.0",
+      schemaVersion: 7,
       taskStorage: "subcollection",
       bases,
       migration: {
@@ -74,7 +83,84 @@ export async function createCloudStore({ config, workspaceId, clientId, fallback
     return { migrated: true, count: sourceTasks.length, source: legacyTasks.length ? "legacy-payload" : "bundled-backup" };
   }
 
+  function matchesRecommendation(data, recommendation) {
+    if (data.recommendationKey === recommendation.recommendationKey) return true;
+    if (Number(data.base || 0) !== Number(recommendation.base || 0)) return false;
+    const current = normalized(data.item);
+    if (!current) return false;
+    const names = [recommendation.item, ...(recommendation.aliases || [])].map(normalized);
+    return names.includes(current);
+  }
+
+  async function ensureTechnologyPlan() {
+    const plan = window.PALGREMIO_CONSTRUCTION_PLAN;
+    if (!plan?.version || !Array.isArray(plan.tasks) || !plan.tasks.length) return { applied: false, count: 0 };
+
+    const workspaceSnapshot = await fs.getDoc(workspaceRef);
+    if (workspaceSnapshot.exists() && workspaceSnapshot.data()?.technologyPlanVersion === plan.version) {
+      return { applied: false, count: workspaceSnapshot.data()?.technologyPlanTaskCount || plan.tasks.length };
+    }
+
+    callbacks.onStatus?.("saving", "Actualizando construcciones", "Aplicando tecnologías máximas por base");
+    const snapshot = await fs.getDocs(tasksRef);
+    const existing = snapshot.docs.map(document => ({ ref: document.ref, id: document.id, data: document.data() }));
+    let batch = fs.writeBatch(db);
+    let writes = 0;
+    let applied = 0;
+
+    async function commitIfNeeded(force = false) {
+      if (!writes || (!force && writes < 350)) return;
+      await batch.commit();
+      batch = fs.writeBatch(db);
+      writes = 0;
+    }
+
+    for (const recommendation of plan.tasks) {
+      const match = existing.find(document => document.id === recommendation.id || matchesRecommendation(document.data, recommendation));
+      const targetRef = match?.ref || fs.doc(tasksRef, cleanId(recommendation.id));
+      const baseData = {
+        id: match?.id || cleanId(recommendation.id),
+        recommendationKey: recommendation.recommendationKey,
+        planVersion: plan.version,
+        base: Number(recommendation.base),
+        category: "Construcción",
+        area: recommendation.area,
+        type: recommendation.type,
+        priority: recommendation.priority,
+        item: recommendation.item,
+        qty_target: Number(recommendation.qty_target || 0),
+        notes: recommendation.notes,
+        aliases: recommendation.aliases || [],
+        source: recommendation.source,
+        updatedBy: clientId,
+        updatedAt: fs.serverTimestamp()
+      };
+      if (!match) {
+        baseData.qty_current = Number(recommendation.qty_current || 0);
+        baseData.status = recommendation.status || "NO";
+        baseData.orderKey = `${String(recommendation.base).padStart(2, "0")}-tech-${String(applied).padStart(3, "0")}`;
+      }
+      batch.set(targetRef, baseData, { merge: true });
+      writes += 1;
+      applied += 1;
+      await commitIfNeeded(false);
+    }
+    await commitIfNeeded(true);
+
+    await fs.setDoc(workspaceRef, {
+      appVersion: "4.1.0",
+      schemaVersion: 7,
+      technologyPlanVersion: plan.version,
+      technologyPlanTaskCount: applied,
+      technologyPlanAppliedAt: fs.serverTimestamp(),
+      updatedAt: fs.serverTimestamp(),
+      updatedBy: clientId
+    }, { merge: true });
+    return { applied: true, count: applied };
+  }
+
   const migration = await migrateIfNeeded();
+  const technologyPlan = await ensureTechnologyPlan();
 
   taskUnsub = fs.onSnapshot(tasksRef, { includeMetadataChanges: true }, snapshot => {
     const tasks = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
@@ -112,6 +198,7 @@ export async function createCloudStore({ config, workspaceId, clientId, fallback
 
   return {
     migration,
+    technologyPlan,
     async saveTask(task, previous = null) {
       const id = cleanId(task.id);
       callbacks.onStatus?.("saving", "Guardando", task.item || "Actualizando tarea");
@@ -144,8 +231,8 @@ export async function createCloudStore({ config, workspaceId, clientId, fallback
     async saveWorkspace(fields) {
       await fs.setDoc(workspaceRef, {
         ...fields,
-        appVersion: "4.0.0",
-        schemaVersion: 6,
+        appVersion: "4.1.0",
+        schemaVersion: 7,
         updatedBy: clientId,
         updatedAt: fs.serverTimestamp()
       }, { merge: true });
