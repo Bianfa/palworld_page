@@ -23,12 +23,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Prepare direct site
+      - name: Rebuild verified fallback data
         run: |
-          rm -rf _site
-          mkdir -p _site
-          cp index.html styles-v3.css app-v3-loader.js app-v3.part1 app-v3.part2 app-v3.part3 app-v3.part4 app-v3.part5 app-v3.part6 app-v3.part7 catalog-v3.js firebase-sync.js data-v3.part1 data-v3.part2 data-v3.part3 data-v3.part4 data-v3.part5 data-v3.part6 data-v3.part7 _site/
+          cat site.b64.00 site.b64.01 site.b64.02 site.b64.03 | tr -d '\r\n\t ' | base64 --decode > /tmp/palgremio-stable.zip
+          unzip -t /tmp/palgremio-stable.zip
+          unzip -p /tmp/palgremio-stable.zip app.js > /tmp/legacy-app.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('/tmp/legacy-app.js', 'utf8');
+          const prefix = 'const DEFAULT_DATA = ';
+          const start = source.indexOf(prefix);
+          const end = source.indexOf(';\nconst APP_VERSION', start);
+          if (start < 0 || end < 0) throw new Error('No se encontró DEFAULT_DATA en el paquete estable');
+          const data = JSON.parse(source.slice(start + prefix.length, end));
+          if (!Array.isArray(data.bases) || data.bases.length < 6) throw new Error('El respaldo no contiene las seis bases');
+          if (!Array.isArray(data.tasks) || data.tasks.length < 100) throw new Error(`Respaldo incompleto: ${data.tasks?.length || 0} tareas`);
+          data.schemaVersion = 6;
+          data.appVersion = '4.0.0';
+          fs.mkdirSync('_site', { recursive: true });
+          fs.writeFileSync('_site/data-v3.part1', JSON.stringify(data));
+          console.log(`Respaldo generado: ${data.bases.length} bases y ${data.tasks.length} tareas`);
+          NODE
+      - name: Prepare commercial site
+        run: |
+          cp index.html styles-v4.css app-v4-loader.js app-v4.part1 app-v4.part2 firebase-store-v4.js _site/
           touch _site/.nojekyll
+      - name: Validate required files
+        run: |
+          test -s _site/index.html
+          test -s _site/app-v4.part1
+          test -s _site/app-v4.part2
+          test -s _site/data-v3.part1
+          node -e "const d=require('./_site/data-v3.part1'); if(d.tasks.length<100) process.exit(1); console.log(d.tasks.length+' tareas listas')"
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload site

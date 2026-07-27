@@ -1,0 +1,47 @@
+name: Validate PalGremio v4
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate JavaScript
+        run: |
+          cat app-v4.part1 app-v4.part2 > /tmp/app-v4.js
+          node --check /tmp/app-v4.js
+          node --check app-v4-loader.js
+          node --check firebase-store-v4.js
+      - name: Rebuild and validate fallback data
+        run: |
+          cat site.b64.00 site.b64.01 site.b64.02 site.b64.03 | tr -d '\r\n\t ' | base64 --decode > /tmp/palgremio-stable.zip
+          unzip -t /tmp/palgremio-stable.zip
+          unzip -p /tmp/palgremio-stable.zip app.js > /tmp/legacy-app.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('/tmp/legacy-app.js', 'utf8');
+          const prefix = 'const DEFAULT_DATA = ';
+          const start = source.indexOf(prefix);
+          const end = source.indexOf(';\nconst APP_VERSION', start);
+          if (start < 0 || end < 0) throw new Error('No se encontró DEFAULT_DATA');
+          const data = JSON.parse(source.slice(start + prefix.length, end));
+          const bases = Array.isArray(data.bases) ? data.bases : [];
+          const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+          if (bases.length < 6) throw new Error(`Faltan bases: ${bases.length}`);
+          if (tasks.length < 100) throw new Error(`El respaldo está incompleto: ${tasks.length} tareas`);
+          const valid = tasks.filter(task => task && task.id && task.item);
+          if (valid.length !== tasks.length) throw new Error(`${tasks.length - valid.length} tareas no son válidas`);
+          console.log({ bases: bases.length, tasks: tasks.length, valid: valid.length });
+          NODE
+      - name: Validate commercial shell
+        run: |
+          grep -q 'PalGremio' index.html
+          grep -q 'app-v4-loader.js' index.html
+          grep -q 'firebase-store-v4.js' app-v4-loader.js

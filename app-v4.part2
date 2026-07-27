@@ -1,0 +1,188 @@
+function renderAdmin() {
+  const migration = state.workspace?.migration;
+  $("#view-admin").innerHTML = `<div class="admin-grid">
+    <article class="admin-card"><h3>Firebase</h3><div class="status-line"><strong>${esc(state.sync.title)}</strong><br>${esc(state.sync.detail)}</div><p class="technical">workspaces/${WORKSPACE_ID}/tasks</p><p>Las tareas se guardan como documentos independientes y se reciben en tiempo real.</p></article>
+    <article class="admin-card"><h3>Migración</h3><div class="status-line">${migration?.completed ? `Completada · ${migration.taskCount || state.tasks.length} tareas` : "Verificando estructura…"}</div><p>La aplicación nunca crea un tablero vacío si el respaldo o la nube no contienen tareas válidas.</p></article>
+    <article class="admin-card"><h3>Respaldo</h3><div class="admin-actions"><button id="exportBtn" class="secondary-btn">Exportar JSON</button><button id="reloadCloudBtn" class="secondary-btn">Recargar página</button></div><p>El respaldo incluye bases, tareas e inventario local.</p></article>
+    <article class="admin-card"><h3>Datos ocultos</h3><details><summary>Fuentes y campos técnicos</summary><p>Las URLs, IDs internos, estado de Firebase y metadatos quedan fuera de las vistas operativas.</p><p class="technical">Versión ${VERSION} · cliente ${clientId}</p></details></article>
+    <article class="admin-card wide"><h3>Historial reciente</h3>${historyHtml()}</article>
+  </div>`;
+}
+function render() {
+  $$(".view").forEach(view => view.classList.remove("active"));
+  $(`#view-${state.view}`).classList.add("active");
+  $$(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === state.view));
+  const titles = { dashboard: "Resumen operativo", bases: "Plan por bases", breeding: "Crianza pendiente", materials: "Construcción y materiales", admin: "Administración" };
+  $("#pageTitle").textContent = titles[state.view];
+  renderDashboard();
+  renderBases();
+  renderBreeding();
+  renderMaterials();
+  renderAdmin();
+}
+function populateForm(task = null) {
+  $("#taskDialogTitle").textContent = task ? "Editar tarea" : "Nueva tarea";
+  $("#taskId").value = task?.id || "";
+  $("#taskBase").innerHTML = state.bases.map(base => `<option value="${base.id}">${base.id}. ${esc(base.short)}</option>`).join("");
+  $("#taskCategory").innerHTML = CATEGORIES.map(category => `<option>${esc(category)}</option>`).join("");
+  $("#taskBase").value = task?.base || state.activeBase;
+  $("#taskCategory").value = task?.category || "Construcción";
+  $("#taskPriority").value = task?.priority || "P1";
+  $("#taskStatus").value = task?.status || "NO";
+  $("#taskItem").value = task?.item || "";
+  $("#taskType").value = task?.type || "";
+  $("#taskPalNo").value = task?.pal_no || "";
+  $("#taskTarget").value = task?.qty_target ?? 1;
+  $("#taskCurrent").value = task?.qty_current ?? 0;
+  $("#taskNotes").value = task?.notes || "";
+  $("#deleteTaskBtn").classList.toggle("hidden", !task);
+  $("#taskDialog").showModal();
+  setTimeout(() => $("#taskItem").focus(), 30);
+}
+function taskFromForm() {
+  const existing = state.tasks.find(task => task.id === $("#taskId").value);
+  return normalizeTask({
+    ...(existing || {}),
+    id: existing?.id || `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    base: Number($("#taskBase").value),
+    base_name: baseById($("#taskBase").value).short,
+    category: $("#taskCategory").value,
+    priority: $("#taskPriority").value,
+    status: $("#taskStatus").value,
+    item: $("#taskItem").value.trim(),
+    type: $("#taskType").value.trim(),
+    pal_no: $("#taskPalNo").value.trim(),
+    qty_target: Number($("#taskTarget").value || 0),
+    qty_current: Number($("#taskCurrent").value || 0),
+    notes: $("#taskNotes").value.trim(),
+    orderKey: existing?.orderKey || `${String($("#taskBase").value).padStart(2, "0")}-${Date.now()}`
+  });
+}
+async function persistTask(task, previous = null) {
+  const index = state.tasks.findIndex(item => item.id === task.id);
+  if (index >= 0) state.tasks[index] = task; else state.tasks.push(task);
+  writeCache();
+  render();
+  try {
+    if (state.cloud) await state.cloud.saveTask(task, previous);
+    toast("Tarea guardada");
+  } catch (error) {
+    setSync("error", "Guardado local", error.message);
+    toast("Guardada localmente; Firebase no respondió");
+  }
+}
+async function toggleTask(id) {
+  const previous = state.tasks.find(task => task.id === id);
+  if (!previous) return;
+  await persistTask({ ...previous, status: previous.status === "OK" ? "NO" : "OK", qty_current: previous.status === "OK" ? previous.qty_current : Math.max(previous.qty_current, previous.qty_target) }, clone(previous));
+}
+async function deleteTask(task) {
+  state.tasks = state.tasks.filter(item => item.id !== task.id);
+  writeCache();
+  render();
+  try { await state.cloud?.deleteTask(task); toast("Tarea eliminada"); }
+  catch { toast("Se eliminó localmente; revisa Firebase"); }
+}
+function exportBackup() {
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), version: VERSION, workspaceId: WORKSPACE_ID, bases: state.bases, tasks: state.tasks, inventory: state.inventory }, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `palgremio_${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+document.addEventListener("click", event => {
+  const actionEl = event.target.closest("[data-action]");
+  const nav = event.target.closest("[data-view]");
+  if (nav) {
+    state.view = nav.dataset.view;
+    $(".sidebar").classList.remove("open");
+    render();
+    return;
+  }
+  if (!actionEl) return;
+  const action = actionEl.dataset.action;
+  if (action === "select-base") { state.activeBase = Number(actionEl.dataset.base); render(); }
+  if (action === "edit-task") populateForm(state.tasks.find(task => task.id === actionEl.dataset.taskId));
+  if (action === "toggle-task") toggleTask(actionEl.dataset.taskId);
+});
+$("#newTaskBtn").addEventListener("click", () => populateForm());
+$("#mobileMenuBtn").addEventListener("click", () => $(".sidebar").classList.toggle("open"));
+$("#globalSearch").addEventListener("input", event => { state.search = event.target.value; render(); });
+$("#closeTaskDialog").addEventListener("click", () => $("#taskDialog").close());
+$("#cancelTaskBtn").addEventListener("click", () => $("#taskDialog").close());
+$("#taskForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const previous = state.tasks.find(task => task.id === $("#taskId").value);
+  const task = taskFromForm();
+  if (!task.item) return;
+  $("#taskDialog").close();
+  await persistTask(task, previous ? clone(previous) : null);
+});
+$("#deleteTaskBtn").addEventListener("click", async () => {
+  const task = state.tasks.find(item => item.id === $("#taskId").value);
+  if (!task || !confirm(`¿Eliminar "${task.item}"?`)) return;
+  $("#taskDialog").close();
+  await deleteTask(task);
+});
+document.addEventListener("change", event => {
+  if (event.target.id === "statusFilter") state.filters.status = event.target.value;
+  else if (event.target.id === "priorityFilter") state.filters.priority = event.target.value;
+  else if (event.target.id === "categoryFilter") state.filters.category = event.target.value;
+  else return;
+  render();
+});
+document.addEventListener("click", event => {
+  if (event.target.id === "exportBtn") exportBackup();
+  if (event.target.id === "reloadCloudBtn") location.reload();
+});
+
+async function bootstrap() {
+  setSync("connecting", "Cargando", "Leyendo respaldo seguro");
+  const response = await fetch(`data-v3.part1?v=${VERSION}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("No se pudo cargar el respaldo inicial.");
+  const fallback = await response.json();
+  if (!Array.isArray(fallback.tasks) || fallback.tasks.length === 0) throw new Error("El respaldo inicial no contiene tareas; se detuvo la carga para proteger el tablero.");
+  state.fallback = fallback;
+  const cache = readCache();
+  state.bases = Array.isArray(cache?.bases) && cache.bases.length ? cache.bases : fallback.bases;
+  state.tasks = (Array.isArray(cache?.tasks) && cache.tasks.length ? cache.tasks : fallback.tasks).map(normalizeTask);
+  state.inventory = cache?.inventory || {};
+  render();
+
+  try {
+    state.cloud = await createCloudStore({
+      config: FIREBASE_CONFIG,
+      workspaceId: WORKSPACE_ID,
+      clientId,
+      fallback,
+      callbacks: {
+        onStatus: setSync,
+        onTasks(tasks) {
+          if (!Array.isArray(tasks) || tasks.length === 0) return;
+          state.tasks = tasks.map(normalizeTask);
+          writeCache();
+          render();
+        },
+        onWorkspace(workspace) {
+          state.workspace = workspace;
+          if (Array.isArray(workspace?.bases) && workspace.bases.length) state.bases = workspace.bases;
+          if (workspace?.inventory && typeof workspace.inventory === "object") state.inventory = workspace.inventory;
+          render();
+        },
+        onHistory(history) { state.history = history || []; if (state.view === "admin") renderAdmin(); }
+      }
+    });
+    setSync("online", "Sincronizado", `${state.tasks.length} tareas en Firebase`);
+    render();
+  } catch (error) {
+    setSync("error", "Modo local protegido", error.message);
+    toast(error.message);
+    render();
+  }
+}
+bootstrap().catch(error => {
+  setSync("error", "No fue posible iniciar", error.message);
+  document.querySelector(".content").innerHTML = `<div class="empty-state"><strong>No fue posible abrir el tablero.</strong><p>${esc(error.message)}</p><p>No se creó ni reemplazó ninguna tarea en Firebase.</p></div>`;
+});

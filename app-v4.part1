@@ -1,0 +1,229 @@
+import { createCloudStore } from "./firebase-store-v4.js";
+
+const VERSION = "4.0.0";
+const WORKSPACE_ID = "palgremio-tarde-juegos-2026";
+const FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyAHZOymzudoB6LnKAiMgDnjEX7wseRsgZ8",
+  authDomain: "palgremio.firebaseapp.com",
+  projectId: "palgremio",
+  storageBucket: "palgremio.firebasestorage.app",
+  messagingSenderId: "389872031786",
+  appId: "1:389872031786:web:284580576b948b77764b53"
+});
+const LOCAL_KEY = "palgremio-v4-cache";
+const CLIENT_KEY = "palgremio-client-id";
+const CATEGORIES = ["Construcción", "Pals", "Configuración", "Producción", "Logística y bienestar", "Crianza"];
+const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2 };
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+}[char]));
+const clone = value => JSON.parse(JSON.stringify(value));
+const clientId = localStorage.getItem(CLIENT_KEY) || crypto.randomUUID();
+localStorage.setItem(CLIENT_KEY, clientId);
+
+const state = {
+  view: "dashboard",
+  activeBase: 1,
+  tasks: [],
+  bases: [],
+  inventory: {},
+  history: [],
+  workspace: null,
+  fallback: null,
+  cloud: null,
+  search: "",
+  filters: { status: "pending", priority: "all", category: "all" },
+  sync: { kind: "connecting", title: "Iniciando", detail: "Cargando respaldo" }
+};
+
+function readCache() {
+  try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || "null"); } catch { return null; }
+}
+function writeCache() {
+  localStorage.setItem(LOCAL_KEY, JSON.stringify({
+    version: VERSION,
+    savedAt: new Date().toISOString(),
+    tasks: state.tasks,
+    bases: state.bases,
+    inventory: state.inventory
+  }));
+}
+function sortTasks(tasks) {
+  return [...tasks].sort((a, b) =>
+    (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) ||
+    Number(a.base || 0) - Number(b.base || 0) ||
+    String(a.orderKey || a.id).localeCompare(String(b.orderKey || b.id))
+  );
+}
+function normalizeTask(task, index = 0) {
+  return {
+    id: String(task.id || `task-${Date.now()}-${index}`),
+    base: Number(task.base || 1),
+    base_name: task.base_name || "",
+    category: CATEGORIES.includes(task.category) ? task.category : inferCategory(task),
+    area: task.area || "",
+    type: task.type || "",
+    priority: ["P0", "P1", "P2"].includes(task.priority) ? task.priority : "P1",
+    item: task.item || "Nueva tarea",
+    pal_no: task.pal_no || "",
+    qty_target: Math.max(0, Number(task.qty_target || 0)),
+    qty_current: Math.max(0, Number(task.qty_current || 0)),
+    status: task.status === "OK" ? "OK" : "NO",
+    notes: task.notes || "",
+    source: task.source || "",
+    orderKey: task.orderKey || `${String(task.base || 0).padStart(2, "0")}-${String(index).padStart(4, "0")}`
+  };
+}
+function inferCategory(task) {
+  const area = String(task.area || "").toLowerCase();
+  const type = String(task.type || "").toLowerCase();
+  if (area.includes("pal") || type.includes("asignar")) return "Pals";
+  if (area.includes("producción") || type.includes("fabricar") || type.includes("cocinar")) return "Producción";
+  if (String(task.base) === "5" && type.includes("criar")) return "Crianza";
+  if (/cofre|cama|baño|almacen|transferencia|pasillo/.test(String(task.item || "").toLowerCase())) return "Logística y bienestar";
+  if (/configurar|evaluar|supervisión/.test(`${type} ${task.item}`.toLowerCase())) return "Configuración";
+  return "Construcción";
+}
+function setSync(kind, title, detail = "") {
+  state.sync = { kind, title, detail };
+  const dot = $("#syncDot");
+  dot.className = `sync-dot ${kind === "online" ? "online" : kind === "error" ? "error" : ""}`;
+  $("#syncText").textContent = title;
+  $("#syncSubtext").textContent = detail;
+}
+function toast(message) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+function baseById(id) {
+  return state.bases.find(base => Number(base.id) === Number(id)) || { id, short: `Base ${id}`, name: `Base ${id}` };
+}
+function matchesSearch(task) {
+  const q = state.search.trim().toLowerCase();
+  if (!q) return true;
+  return [task.item, task.type, task.notes, task.pal_no, task.category, task.priority]
+    .join(" ").toLowerCase().includes(q);
+}
+function filteredTasks({ base = null, forceAll = false } = {}) {
+  return sortTasks(state.tasks.filter(task => {
+    if (base !== null && Number(task.base) !== Number(base)) return false;
+    if (!matchesSearch(task)) return false;
+    if (!forceAll) {
+      if (state.filters.status === "pending" && task.status === "OK") return false;
+      if (state.filters.status === "done" && task.status !== "OK") return false;
+      if (state.filters.priority !== "all" && task.priority !== state.filters.priority) return false;
+      if (state.filters.category !== "all" && task.category !== state.filters.category) return false;
+    }
+    return true;
+  }));
+}
+function metrics() {
+  const total = state.tasks.length;
+  const done = state.tasks.filter(task => task.status === "OK").length;
+  const pendingP0 = state.tasks.filter(task => task.status !== "OK" && task.priority === "P0").length;
+  const pals = state.tasks.filter(task => task.category === "Pals").reduce((sum, task) => sum + Number(task.qty_target || 0), 0);
+  return { total, done, pending: total - done, pct: total ? Math.round(done * 100 / total) : 0, pendingP0, pals };
+}
+function metricCard(label, value, detail, progress = null) {
+  return `<article class="metric-card"><span class="label">${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small>${progress === null ? "" : `<div class="progress"><span style="width:${Math.max(0, Math.min(100, progress))}%"></span></div>`}</article>`;
+}
+function taskRow(task) {
+  const base = baseById(task.base);
+  return `<article class="task-row" data-task-id="${esc(task.id)}">
+    <button class="task-check ${task.status === "OK" ? "done" : ""}" data-action="toggle-task" data-task-id="${esc(task.id)}">${task.status === "OK" ? "✓" : ""}</button>
+    <button class="task-main link-btn" data-action="edit-task" data-task-id="${esc(task.id)}"><strong>${esc(task.item)}</strong><span>${esc(base.short)} · ${esc(task.category)}${task.type ? ` · ${esc(task.type)}` : ""}</span></button>
+    <div class="task-meta"><span class="chip ${task.priority.toLowerCase()}">${task.priority}</span>${task.qty_target ? `<span class="chip">${task.qty_current}/${task.qty_target}</span>` : ""}</div>
+  </article>`;
+}
+function renderDashboard() {
+  const m = metrics();
+  const priority = sortTasks(state.tasks.filter(task => task.status !== "OK" && task.priority === "P0" && matchesSearch(task))).slice(0, 12);
+  const baseHealth = state.bases.map(base => {
+    const tasks = state.tasks.filter(task => Number(task.base) === Number(base.id));
+    const done = tasks.filter(task => task.status === "OK").length;
+    const pct = tasks.length ? Math.round(done * 100 / tasks.length) : 0;
+    return `<article class="base-health-item"><header><strong>${base.id}. ${esc(base.short)}</strong><span>${pct}%</span></header><div class="progress"><span style="width:${pct}%"></span></div><small>${done}/${tasks.length} tareas listas</small></article>`;
+  }).join("");
+  $("#view-dashboard").innerHTML = `
+    <div class="metrics-grid">
+      ${metricCard("Avance global", `${m.pct}%`, `${m.done} de ${m.total} tareas`, m.pct)}
+      ${metricCard("Pendientes", m.pending, `${m.pendingP0} de prioridad P0`)}
+      ${metricCard("Pals planificados", m.pals, "Suma de objetivos por base")}
+      ${metricCard("Sincronización", state.sync.kind === "online" ? "Activa" : "Local", state.sync.detail)}
+    </div>
+    <div class="dashboard-grid">
+      <article class="panel-card"><div class="section-head"><div><h2>Prioridades inmediatas</h2><p>Solo tareas P0 pendientes.</p></div><span class="chip p0">${priority.length} visibles</span></div>
+        <div class="task-list">${priority.length ? priority.map(taskRow).join("") : `<div class="empty-state">No quedan tareas P0 pendientes.</div>`}</div>
+      </article>
+      <article class="panel-card"><div class="section-head"><div><h2>Estado de las bases</h2><p>Avance operativo por ubicación.</p></div></div><div class="base-health">${baseHealth}</div></article>
+    </div>`;
+}
+function filtersHtml() {
+  return `<div class="filterbar">
+    <select id="statusFilter"><option value="pending">Pendientes</option><option value="all">Todas</option><option value="done">Completadas</option></select>
+    <select id="priorityFilter"><option value="all">Toda prioridad</option><option>P0</option><option>P1</option><option>P2</option></select>
+    <select id="categoryFilter"><option value="all">Toda categoría</option>${CATEGORIES.map(c => `<option>${esc(c)}</option>`).join("")}</select>
+  </div>`;
+}
+function taskCard(task) {
+  const pct = task.qty_target ? Math.min(100, Math.round(Number(task.qty_current || 0) * 100 / Number(task.qty_target))) : (task.status === "OK" ? 100 : 0);
+  return `<article class="task-card"><div class="task-card-head"><h4>${esc(task.item)}</h4><span class="chip ${task.priority.toLowerCase()}">${task.priority}</span></div><p>${esc(task.notes || task.type || "Sin notas")}</p>
+    <div class="quantity"><span>${task.qty_target ? `${task.qty_current}/${task.qty_target}` : task.status === "OK" ? "Completada" : "Pendiente"}</span><span>${pct}%</span></div><div class="progress"><span style="width:${pct}%"></span></div>
+    <div class="task-card-actions"><button class="task-check ${task.status === "OK" ? "done" : ""}" data-action="toggle-task" data-task-id="${esc(task.id)}">${task.status === "OK" ? "✓" : ""}</button><button class="link-btn" data-action="edit-task" data-task-id="${esc(task.id)}">Editar</button></div></article>`;
+}
+function renderBases() {
+  const base = baseById(state.activeBase);
+  const tasks = filteredTasks({ base: state.activeBase });
+  const allBaseTasks = state.tasks.filter(task => Number(task.base) === Number(state.activeBase));
+  const palTarget = allBaseTasks.filter(task => task.category === "Pals").reduce((sum, task) => sum + Number(task.qty_target || 0), 0);
+  const capacityClass = palTarget > 35 ? "danger" : palTarget >= 32 ? "warn" : "";
+  const grouped = CATEGORIES.map(category => {
+    const rows = tasks.filter(task => task.category === category);
+    if (!rows.length) return "";
+    return `<section class="category-section"><h3><span>${esc(category)}</span><span class="chip">${rows.length}</span></h3><div class="tasks-grid">${rows.map(taskCard).join("")}</div></section>`;
+  }).join("");
+  $("#view-bases").innerHTML = `${filtersHtml()}<div class="base-tabs">${state.bases.map(item => `<button class="base-tab ${Number(item.id) === Number(state.activeBase) ? "active" : ""}" data-action="select-base" data-base="${item.id}">${item.id}. ${esc(item.short)}</button>`).join("")}</div>
+    <article class="base-summary"><div class="base-summary-top"><div><p class="eyebrow">BASE ${base.id}</p><h2>${esc(base.name)}</h2><p>${esc(base.purpose || "")}</p></div><div><span class="capacity ${capacityClass}">${palTarget}/35 Pals</span><p>${allBaseTasks.filter(t => t.status === "OK").length}/${allBaseTasks.length} tareas listas</p></div></div></article>
+    ${grouped || `<div class="empty-state">No hay tareas que coincidan con los filtros.</div>`}`;
+  $("#statusFilter").value = state.filters.status;
+  $("#priorityFilter").value = state.filters.priority;
+  $("#categoryFilter").value = state.filters.category;
+}
+function deriveBreeding() {
+  const groups = new Map();
+  state.tasks.filter(task => task.category === "Pals").forEach(task => {
+    const key = String(task.pal_no || task.item).trim().toLowerCase();
+    if (!key) return;
+    const row = groups.get(key) || { key, name: task.item, number: task.pal_no, target: 0, current: 0, priority: "P2", bases: [] };
+    row.target += Number(task.qty_target || 0);
+    row.current += Number(task.qty_current || 0);
+    if ((PRIORITY_ORDER[task.priority] ?? 9) < (PRIORITY_ORDER[row.priority] ?? 9)) row.priority = task.priority;
+    row.bases.push(`${baseById(task.base).short}: ${task.qty_current || 0}/${task.qty_target || 0}`);
+    groups.set(key, row);
+  });
+  return [...groups.values()].map(row => ({ ...row, missing: Math.max(0, row.target - row.current) }))
+    .filter(row => row.missing > 0)
+    .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9) || b.missing - a.missing);
+}
+function renderBreeding() {
+  const rows = deriveBreeding();
+  $("#view-breeding").innerHTML = `<article class="panel-card"><div class="section-head"><div><h2>Cola de crianza pendiente</h2><p>Los Pals desaparecen automáticamente cuando el total actual cubre la meta.</p></div><span class="chip">${rows.length} especies</span></div>
+    ${rows.length ? `<div class="table-wrap"><table class="breeding-table"><thead><tr><th>Pal</th><th>Bases</th><th>Objetivo</th><th>Actual</th><th>Faltan</th><th>Prioridad</th></tr></thead><tbody>${rows.map(row => `<tr><td><strong>${esc(row.name)}</strong><br><small>${esc(row.number)}</small></td><td>${esc(row.bases.join(" · "))}</td><td>${row.target}</td><td>${row.current}</td><td class="missing">${row.missing}</td><td><span class="chip ${row.priority.toLowerCase()}">${row.priority}</span></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state">¡Todos los Pals planificados ya están cubiertos!</div>`}</article>`;
+}
+function renderMaterials() {
+  const construction = state.tasks.filter(task => task.category === "Construcción");
+  $("#view-materials").innerHTML = `<article class="panel-card"><div class="section-head"><div><h2>Plan de construcción</h2><p>Vista comercial simplificada. Las recetas avanzadas permanecen en Administración.</p></div><span class="chip">${construction.length} elementos</span></div>
+    <div class="table-wrap"><table class="materials-table"><thead><tr><th>Construcción</th><th>Base</th><th>Meta</th><th>Actual</th><th>Falta</th><th>Estado</th></tr></thead><tbody>${sortTasks(construction).map(task => `<tr><td><button class="link-btn" data-action="edit-task" data-task-id="${esc(task.id)}"><strong>${esc(task.item)}</strong></button></td><td>${esc(baseById(task.base).short)}</td><td>${task.qty_target}</td><td>${task.qty_current}</td><td class="${Math.max(0, task.qty_target - task.qty_current) ? "missing" : "complete"}">${Math.max(0, task.qty_target - task.qty_current)}</td><td>${task.status === "OK" ? `<span class="chip ok">Lista</span>` : `<span class="chip">Pendiente</span>`}</td></tr>`).join("")}</tbody></table></div></article>`;
+}
+function historyHtml() {
+  if (!state.history.length) return `<p>No hay eventos registrados todavía.</p>`;
+  return state.history.slice(0, 50).map(entry => {
+    const date = entry.createdAt?.toDate ? entry.createdAt.toDate() : null;
+    return `<div class="status-line"><strong>${esc(entry.label || entry.taskId || "Cambio")}</strong><br><small>${esc(entry.action || "updated")}${date ? ` · ${date.toLocaleString("es-CL")}` : ""}</small></div>`;
+  }).join("");
+}
