@@ -3,76 +3,85 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#12355b">
-  <title>Plan de Bases Palworld 1.0</title>
-  <link rel="stylesheet" href="styles-v3.css?v=3.0.1">
+  <meta name="theme-color" content="#101828">
+  <title>PalGremio · Plan de Bases</title>
+  <link rel="stylesheet" href="styles-v4.css?v=4.0.0">
 </head>
 <body>
-<header>
-  <div class="wrap header-row">
-    <div>
-      <h1>Plan de Bases Palworld 1.0</h1>
-      <p>6 bases utilizables · máximo 35 Pals · checklist editable y sincronizado</p>
-    </div>
-    <div class="sync-pill" id="syncPill">Conectando…</div>
-  </div>
-</header>
-<main class="wrap">
-  <div class="toolbar">
-    <button class="primary" id="editBtn" type="button">Activar edición</button>
-    <button id="syncBtn" type="button">Configurar sincronización</button>
-    <button id="catalogBtn" type="button">Catálogo Palworld</button>
-    <button id="exportBtn" type="button">Exportar respaldo</button>
-    <button id="importBtn" type="button">Importar respaldo</button>
-    <input id="importFile" type="file" accept="application/json,.json" hidden>
-    <button id="printBtn" type="button">Imprimir / PDF</button>
-  </div>
-  <p class="save-note" id="saveNote" aria-live="polite">Cargando datos guardados…</p>
-  <section class="metrics">
-    <div class="metric"><small>Avance global</small><strong id="globalPct">0%</strong><div class="progress"><span id="globalBar"></span></div></div>
-    <div class="metric"><small>Tareas completas</small><strong id="globalDone">0</strong></div>
-    <div class="metric"><small>Total de tareas</small><strong id="globalTotal">0</strong></div>
-    <div class="metric"><small>Versión</small><strong id="appVersion">3.0.1</strong></div>
-  </section>
-  <div class="tabs" id="tabs"></div>
-  <section id="panels"></section>
-  <section class="card" id="breedingPanel"></section>
-  <section class="card" id="materialsPanel"></section>
-  <section class="card" id="catalogSummaryPanel"></section>
-  <section class="card" id="sourcesPanel"></section>
-</main>
-<footer class="wrap">El código y los datos están separados: las nuevas versiones no borran el progreso local ni el documento compartido de Firestore.</footer>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">PG</div>
+        <div><strong>PalGremio</strong><span>Plan de bases</span></div>
+      </div>
+      <nav id="mainNav" class="main-nav" aria-label="Secciones">
+        <button class="nav-item active" data-view="dashboard"><span>▦</span>Resumen</button>
+        <button class="nav-item" data-view="bases"><span>⌂</span>Bases</button>
+        <button class="nav-item" data-view="breeding"><span>◇</span>Crianza</button>
+        <button class="nav-item" data-view="materials"><span>▤</span>Materiales</button>
+        <button class="nav-item admin-link" data-view="admin"><span>⚙</span>Administración</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="syncDot" class="sync-dot"></div>
+        <div><strong id="syncText">Iniciando…</strong><span id="syncSubtext">Preparando tablero</span></div>
+      </div>
+    </aside>
 
-<dialog id="syncDialog">
-  <form method="dialog" class="dialog-card" id="syncForm">
-    <h2>Sincronización con Firebase</h2>
-    <p>La aplicación usa el proyecto <strong>palgremio</strong> y el mismo tablero compartido en todos los dispositivos.</p>
-    <label>ID compartido del espacio
-      <input id="workspaceInput" type="text" autocomplete="off">
-    </label>
-    <p class="hint">En modo prueba, cualquier persona con el enlace puede modificar este tablero.</p>
-    <div class="dialog-actions">
-      <button value="cancel" type="button" id="closeSyncBtn">Cerrar</button>
-      <button type="button" id="disconnectBtn">Desconectar nube</button>
-      <button class="primary" type="button" id="connectBtn">Conectar y sincronizar</button>
-    </div>
-    <p id="syncMessage" class="save-note" aria-live="polite"></p>
-  </form>
-</dialog>
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <button id="mobileMenuBtn" class="icon-btn mobile-only" type="button" aria-label="Abrir menú">☰</button>
+          <p class="eyebrow">PARQUE CENTRAL · PALWORLD</p>
+          <h1 id="pageTitle">Resumen operativo</h1>
+        </div>
+        <div class="top-actions">
+          <label class="search-box">
+            <span>⌕</span>
+            <input id="globalSearch" type="search" placeholder="Buscar tarea o Pal…">
+          </label>
+          <button id="newTaskBtn" class="primary-btn" type="button">+ Nueva tarea</button>
+        </div>
+      </header>
 
-<dialog id="catalogDialog">
-  <div class="dialog-card catalog-dialog">
-    <div class="section-head"><h2>Catálogo Palworld</h2><button type="button" id="closeCatalogBtn">Cerrar</button></div>
-    <p class="hint" id="catalogMeta"></p>
-    <div class="catalog-controls">
-      <label>Tipo<select id="catalogKind"><option value="structure">Construcciones</option><option value="pal">Pals</option><option value="item">Ítems</option></select></label>
-      <label>Base<select id="catalogBase"></select></label>
-      <label class="catalog-search">Buscar<input id="catalogSearch" type="search" placeholder="Nombre, número, función…"></label>
-      <label class="import-label">Importar catálogo JSON<input id="catalogImport" type="file" accept="application/json,.json"></label>
+      <main class="content">
+        <section id="view-dashboard" class="view active"></section>
+        <section id="view-bases" class="view"></section>
+        <section id="view-breeding" class="view"></section>
+        <section id="view-materials" class="view"></section>
+        <section id="view-admin" class="view"></section>
+      </main>
     </div>
-    <div id="catalogResults" class="catalog-results"></div>
   </div>
-</dialog>
-<script type="module" src="app-v3-loader.js?v=3.0.1"></script>
+
+  <dialog id="taskDialog">
+    <form id="taskForm" class="modal-card">
+      <div class="modal-head">
+        <div><p class="eyebrow">EDITOR</p><h2 id="taskDialogTitle">Nueva tarea</h2></div>
+        <button id="closeTaskDialog" class="icon-btn" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <input id="taskId" type="hidden">
+      <div class="form-grid">
+        <label>Base<select id="taskBase" required></select></label>
+        <label>Categoría<select id="taskCategory" required></select></label>
+        <label>Prioridad<select id="taskPriority"><option>P0</option><option>P1</option><option>P2</option></select></label>
+        <label>Estado<select id="taskStatus"><option value="NO">Pendiente</option><option value="OK">Completada</option></select></label>
+        <label class="wide">Elemento o Pal<input id="taskItem" required maxlength="140"></label>
+        <label>Tipo / función<input id="taskType" maxlength="100"></label>
+        <label>N.º Pal<input id="taskPalNo" maxlength="20"></label>
+        <label>Meta<input id="taskTarget" type="number" min="0" step="1"></label>
+        <label>Actual<input id="taskCurrent" type="number" min="0" step="1"></label>
+        <label class="wide">Notas<textarea id="taskNotes" rows="4" maxlength="800"></textarea></label>
+      </div>
+      <div class="modal-actions">
+        <button id="deleteTaskBtn" class="danger-btn hidden" type="button">Eliminar</button>
+        <span class="modal-spacer"></span>
+        <button id="cancelTaskBtn" class="secondary-btn" type="button">Cancelar</button>
+        <button class="primary-btn" type="submit">Guardar tarea</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app-v4-loader.js?v=4.0.0"></script>
 </body>
 </html>
