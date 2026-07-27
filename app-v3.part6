@@ -1,0 +1,109 @@
+
+function v31StageSelect(row) {
+  const value=row.stage;
+  return `<select class="edit-field breeding-stage" data-field="stage" data-collection="breeding_profiles" data-id="${esc(row.profile.id)}">${V31_STAGE_OPTIONS.map(s=>`<option ${s===value?"selected":""}>${s}</option>`).join("")}</select>`;
+}
+function v31StarsSelect(row) {
+  const stars=Number(row.profile.condensation_stars||0);
+  return `<select class="edit-field breeding-stars" data-field="condensation_stars" data-collection="breeding_profiles" data-id="${esc(row.profile.id)}">${[0,1,2,3,4].map(n=>`<option value="${n}" ${n===stars?"selected":""}>${n}★</option>`).join("")}</select>`;
+}
+function v31DistributionHtml(row) {
+  return row.distributions.map(d=>`<span class="distribution-chip ${d.proposedMissing?"pending":"ready"}">${esc(d.base)}: ${d.current}/${d.target}${d.proposed>d.current?` · propuesto ${d.proposed}`:""}</span>`).join(" ");
+}
+function v31RenderBreeding() {
+  const all=v31DeriveBreedingQueue();
+  const pending=all.filter(r=>r.totalMissing>0);
+  const completed=all.filter(r=>r.totalMissing===0);
+  const visible=store.settings.show_completed_breeding?all:pending;
+  const rows=visible.map((r,index)=>`<tr class="${r.totalMissing===0?"completed-row":""}">
+    <td>${index+1}</td><td><strong>${esc(r.name)}</strong><br><small>${esc(r.number)}</small></td>
+    <td class="distribution-cell">${v31DistributionHtml(r)}</td>
+    <td>${r.target}</td>
+    <td><input class="pal-global-field" type="number" min="0" value="${r.available}" data-pal-key="${esc(r.key)}"></td>
+    <td class="${r.missingWorkers?"missing":"complete"}">${r.missingWorkers}</td>
+    <td>${v31StarsSelect(r)}<br><small>${r.profile.copies_per_worker} copias totales/Pal</small></td>
+    <td>${r.requiredFodder}</td>
+    <td><input class="edit-field" type="number" min="0" value="${r.currentFodder}" data-field="condensation_fodder_current" data-collection="breeding_profiles" data-id="${esc(r.profile.id)}"></td>
+    <td class="${r.totalMissing?"missing":"complete"}"><strong>${r.totalMissing}</strong><br><small>${r.missingWorkers} titulares + ${r.missingFodder} condensación</small></td>
+    <td><span class="badge ${r.priority.toLowerCase()}">${r.priority}</span></td><td>${v31StageSelect(r)}</td>
+    <td><button class="small" data-action="auto-allocate-pal" data-pal-key="${esc(r.key)}">Distribuir</button></td>
+    <td>${staticOrArea(r.profile.passives,"breeding_profiles",r.profile.id,"passives")}</td>
+    <td>${staticOrInput(r.profile.cake,"breeding_profiles",r.profile.id,"cake")}</td>
+    <td>${staticOrInput(r.profile.parent_a,"breeding_profiles",r.profile.id,"parent_a")} ${editMode?"+":""} ${staticOrInput(r.profile.parent_b,"breeding_profiles",r.profile.id,"parent_b")}</td>
+    <td>${staticOrArea(r.profile.notes,"breeding_profiles",r.profile.id,"notes")}</td>
+  </tr>`).join("");
+  const totalTarget=all.reduce((s,r)=>s+r.target,0), totalAvailable=all.reduce((s,r)=>s+r.available,0), totalMissing=all.reduce((s,r)=>s+r.totalMissing,0);
+  $("#breedingPanel").innerHTML=`<div class="section-head"><div><h2>Cola automática de crianza</h2><span class="checklist-help">${totalAvailable}/${totalTarget} trabajadores disponibles · ${pending.length} especies pendientes · ${totalMissing} copias/huevos por obtener</span></div><button id="showCompletedBreedingBtn" type="button">${store.settings.show_completed_breeding?"Ocultar completados":`Ver completados (${completed.length})`}</button></div>
+  <p class="note">Los Pals sin déficit desaparecen automáticamente de la cola. La cantidad global indica cuántos ejemplares útiles tienen; <strong>Distribuir</strong> los asigna entre bases por prioridad. La condensación usa un preset editable por estrellas.</p>
+  ${visible.length?`<div class="table-wrap"><table class="breeding-table"><thead><tr><th>#</th><th>Pal</th><th>Distribución por base</th><th>Trabajadores</th><th>Disponibles globales</th><th>Faltan trabajadores</th><th>Condensación</th><th>Copias requeridas</th><th>Copias disponibles</th><th>Faltan total</th><th>Prio.</th><th>Etapa</th><th>Asignar</th><th>Pasivas</th><th>Pastel</th><th>Progenitores</th><th>Notas</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="all-complete"><strong>¡Cola completada!</strong><p>No faltan Pals ni copias de condensación para los objetivos actuales.</p></div>`}`;
+}
+renderBreeding = v31RenderBreeding;
+
+function v31BaseCapacity(baseId) {
+  const tasks=store.tasks.filter(t=>Number(t.base)===Number(baseId)&&inferTaskCategory(t)==="Pals");
+  const target=tasks.reduce((s,t)=>s+Math.max(0,Number(t.qty_target||0)),0);
+  const current=tasks.reduce((s,t)=>s+Math.max(0,Number(t.qty_current||0)),0);
+  return {target,current,remaining:35-target,level:target>35?"danger":target>=32?"warning":"ok"};
+}
+renderBases = function() {
+  v31OriginalRenderBases();
+  for (const base of store.bases) {
+    const capacity=v31BaseCapacity(base.id);
+    const panel=$(`#base-${base.id}`); const firstCard=panel?.querySelector(".card"); if(!firstCard)continue;
+    const text=capacity.target>35?`Excede el límite por ${capacity.target-35} Pals`:capacity.target>=32?`Quedan ${35-capacity.target} cupos planificados`:`${capacity.target}/35 Pals planificados · ${35-capacity.target} cupos libres`;
+    firstCard.insertAdjacentHTML("beforeend",`<div class="capacity-alert ${capacity.level}"><strong>Capacidad:</strong> ${text} · asignados actualmente ${capacity.current}</div>`);
+  }
+};
+
+function v31MaterialsForBase(baseId,expand=false) {
+  const totals={};
+  for(const task of store.tasks.filter(t=>Number(t.base)===Number(baseId)&&inferTaskCategory(t)==="Construcción")){
+    const structure=structureForTask(task); if(!structure?.materials)continue;
+    const qty=Math.max(0,Number(task.qty_target||0));
+    for(const [id,,amount] of structure.materials){if(expand)expandMaterial(id,qty*Number(amount||0),totals);else totals[id]=(totals[id]||0)+qty*Number(amount||0);}
+  }
+  return Object.entries(totals).map(([id,required])=>({id,name:itemById(id)?.name||id,required})).sort((a,b)=>b.required-a.required||a.name.localeCompare(b.name));
+}
+function v31MaterialTable(rows,{stock=true}={}) {
+  return `<div class="table-wrap"><table><thead><tr><th>Material</th><th>Necesario</th>${stock?"<th>Stock global</th><th>Falta comprar/fabricar</th>":""}</tr></thead><tbody>${rows.map(r=>{const have=Number(store.inventory?.[r.id]||0),missing=Math.max(0,r.required-have);return`<tr><td><strong>${esc(r.name)}</strong></td><td>${r.required}</td>${stock?`<td><input class="inventory-field" type="number" min="0" value="${have}" data-item-id="${esc(r.id)}"></td><td class="${missing?"missing":"complete"}">${missing}</td>`:""}</tr>`}).join("")}</tbody></table></div>`;
+}
+function v31RenderMaterials(){
+  const direct=deriveMaterials(false), raw=deriveMaterials(true), unresolved=store.tasks.filter(t=>inferTaskCategory(t)==="Construcción"&&!structureForTask(t));
+  const byBase=store.bases.map(base=>{const rows=v31MaterialsForBase(base.id,false);return rows.length?`<details><summary>Base ${base.id}: ${esc(base.short)} · ${rows.length} materiales</summary>${v31MaterialTable(rows,{stock:false})}</details>`:""}).join("");
+  $("#materialsPanel").innerHTML=`<div class="section-head"><div><h2>Lista de compra y construcción</h2><span class="checklist-help">Totales automáticos desde las construcciones vinculadas al catálogo.</span></div><button id="recalculateBtn" type="button">Recalcular todo</button></div>
+  <details open><summary>Compra/fabricación global pendiente</summary>${v31MaterialTable(direct,{stock:true})}</details>
+  <details><summary>Materias primas conocidas</summary><p class="hint">Desglose recursivo solo para recetas cargadas en el catálogo.</p>${v31MaterialTable(raw,{stock:true})}</details>
+  <details><summary>Necesidad por base</summary>${byBase||"<p>No hay construcciones vinculadas.</p>"}</details>
+  ${unresolved.length?`<div class="capacity-alert warning"><strong>${unresolved.length} construcciones sin receta:</strong> ${unresolved.slice(0,8).map(t=>esc(t.item)).join(" · ")}${unresolved.length>8?"…":""}. Activa edición y vincúlalas al catálogo para calcular sus materiales.</div>`:""}`;
+}
+renderMaterials = v31RenderMaterials;
+
+function v31RenderHistory(){
+  const panel=$("#historyPanel"); if(!panel)return;
+  const rows=[...(store.change_history||[])].reverse().slice(0,150);
+  panel.innerHTML=`<div class="section-head"><div><h2>Historial de cambios</h2><span class="checklist-help">Se agrupan las ediciones consecutivas del mismo campo para no registrar cada letra por separado.</span></div><button id="clearHistoryBtn" type="button">Limpiar historial</button></div>
+  ${rows.length?`<div class="history-list">${rows.map(h=>`<article class="history-entry"><time>${new Date(h.at).toLocaleString("es-CL")}</time><div><strong>${esc(h.label)}</strong><span>${esc(h.field)}</span><p><del>${esc(h.before)}</del> → <ins>${esc(h.after)}</ins></p></div></article>`).join("")}</div>`:`<p class="hint">Todavía no hay cambios registrados en esta versión.</p>`}`;
+}
+
+function v31EnsureUI(){
+  const toolbar=document.querySelector(".toolbar");
+  if(toolbar&&!$("#recalculateTopBtn")) toolbar.insertAdjacentHTML("beforeend",`<button id="recalculateTopBtn" type="button">Recalcular todo</button>`);
+  if(!$("#historyPanel")){const sources=$("#sourcesPanel");sources?.insertAdjacentHTML("beforebegin",`<section class="card" id="historyPanel"></section>`);}
+  if(!$("#v31Styles")){
+    const style=document.createElement("style");style.id="v31Styles";style.textContent=`
+      .capacity-alert{margin-top:12px;padding:10px 12px;border-radius:9px;background:#edf7ee;border:1px solid #a8d5ae}.capacity-alert.warning{background:#fff7e1;border-color:#e3c467}.capacity-alert.danger{background:#ffebe9;border-color:#e3a39c;color:#8b1e18}
+      .distribution-cell{min-width:250px}.distribution-chip{display:inline-block;margin:2px;padding:4px 7px;border-radius:999px;background:#edf2f7;font-size:12px}.distribution-chip.ready{background:#e5f5e8}.distribution-chip.pending{background:#fff1d6}
+      .breeding-table input[type=number]{min-width:78px}.breeding-table select{min-width:120px}.completed-row{opacity:.72;background:#f4faf5}.all-complete{text-align:center;padding:30px;border:1px dashed #9dc9a4;border-radius:12px;background:#f3fbf4}
+      .history-list{display:grid;gap:8px;max-height:520px;overflow:auto}.history-entry{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px;border-bottom:1px solid #e3e8ef}.history-entry time{font-size:12px;color:#667085}.history-entry span{display:block;font-size:12px;color:#667085}.history-entry p{margin:3px 0}.history-entry del{color:#9b2c2c}.history-entry ins{color:#237a38;text-decoration:none}
+      @media(max-width:700px){.history-entry{grid-template-columns:1fr}.breeding-table{min-width:1500px}}
+    `;document.head.appendChild(style);
+  }
+}
+
+renderAll = function(){
+  v31EnsureStore(); v31EnsureUI();
+  v31OriginalRenderAll();
+  $("#appVersion").textContent=V31_VERSION;
+  v31RenderHistory();
+  v31HistoryBaseline=v31Comparable(store);
+};
