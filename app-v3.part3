@@ -1,0 +1,88 @@
+    <td>${input(t.qty_target,"tasks",t.id,"qty_target","number")}</td>
+    <td>${input(t.qty_current ?? 0,"tasks",t.id,"qty_current","number")}</td>
+    <td>${statusButton(t.status,"tasks",t.id)}</td>
+    <td>${staticOrArea(t.notes,"tasks",t.id,"notes")}</td>
+    <td class="row-actions">${deleteBtn("tasks",t.id)}</td>
+  </tr>`).join("");
+}
+function renderChecklistGroup(category, tasks, baseId) {
+  const categoryTasks = tasks.filter(task => inferTaskCategory(task) === category);
+  if (!categoryTasks.length && !editMode) return "";
+  const done = categoryTasks.filter(task => task.status === "OK").length;
+  const extra = category === "Pals" ? ` · ${categoryTasks.reduce((sum,task)=>sum+Number(task.qty_target||0),0)} Pals objetivo` : "";
+  return `<section class="checklist-group">
+    <div class="section-head checklist-title">
+      <h4>${esc(category)} <span class="category-count">${done}/${categoryTasks.length}${extra}</span></h4>
+      <button class="small edit-only" data-action="add-row" data-collection="tasks" data-base="${baseId}" data-category="${esc(category)}">Agregar ítem</button>
+    </div>
+    ${categoryTasks.length ? `<div class="table-wrap"><table><thead><tr><th>Prio.</th>${editMode?"<th>Categoría</th>":""}<th>Elemento / Pal</th><th>Tipo / función</th><th>N.º</th><th>Meta</th><th>Actual</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>${renderTaskRows(categoryTasks)}</tbody></table></div>` : `<p class="empty-category">Sin ítems todavía.</p>`}
+  </section>`;
+}
+function renderBases() {
+  $("#panels").innerHTML = store.bases.map(b => {
+    const tasks = store.tasks.filter(t=>Number(t.base)===Number(b.id)).map(task => ({...task,category:inferTaskCategory(task)}));
+    const done = tasks.filter(t=>t.status==="OK").length;
+    const pct = tasks.length ? Math.round(done*100/tasks.length) : 0;
+    const palTotal = tasks.filter(t=>inferTaskCategory(t)==="Pals").reduce((s,t)=>s+Number(t.qty_target||0),0);
+    const groups = CHECKLIST_CATEGORIES.map(category => renderChecklistGroup(category,tasks,b.id)).join("");
+    return `<article class="panel ${b.id===activeBase?"active":""}" id="base-${b.id}">
+      <div class="card"><h2>Base ${b.id}: ${esc(b.name)}</h2>${baseEditor(b)}<div class="progress"><span style="width:${pct}%"></span></div><small>${done}/${tasks.length} ítems · ${palTotal}/35 Pals objetivo</small></div>
+      <div class="card unified-checklist"><div class="section-head"><h3>Checklist de la base</h3><span class="checklist-help">Construcción, Pals, configuración, producción y logística en un solo lugar.</span></div>${groups}</div>
+    </article>`;
+  }).join("");
+}
+function renderBreeding() {
+  const queue=deriveBreedingQueue();
+  const rows=queue.map((r,index)=>{const p=r.profile; return `<tr>
+    <td>${index+1}</td><td><strong>${esc(r.name)}</strong></td><td>${esc(r.number)}</td><td>${esc(r.bases.join(" · "))}</td>
+    <td>${r.target}</td><td>${r.current}</td><td><strong>${r.missing}</strong></td><td><span class="badge ${r.priority.toLowerCase()}">${r.priority}</span></td>
+    <td>${staticOrArea(p.passives,"breeding_profiles",p.id,"passives")}</td><td>${staticOrInput(p.cake,"breeding_profiles",p.id,"cake")}</td>
+    <td>${staticOrInput(p.parent_a,"breeding_profiles",p.id,"parent_a")} ${editMode?"+":""} ${staticOrInput(p.parent_b,"breeding_profiles",p.id,"parent_b")}</td>
+    <td>${staticOrArea(p.notes,"breeding_profiles",p.id,"notes")}</td>
+  </tr>`}).join("");
+  const totalTarget=queue.reduce((s,r)=>s+r.target,0), totalCurrent=queue.reduce((s,r)=>s+r.current,0), totalMissing=queue.reduce((s,r)=>s+r.missing,0);
+  $("#breedingPanel").innerHTML=`<div class="section-head"><h2>Cola automática de crianza</h2><span class="checklist-help">${totalCurrent}/${totalTarget} Pals listos · faltan ${totalMissing}</span></div><p class="note">Esta cola se genera automáticamente desde todos los ítems de categoría <strong>Pals</strong> de las bases. Para cambiar la meta o descontar Pals disponibles, edita las columnas Meta y Actual en el checklist de cada base.</p><div class="table-wrap"><table><thead><tr><th>#</th><th>Pal</th><th>N.º</th><th>Distribución por base</th><th>Total</th><th>Actual</th><th>Faltan</th><th>Prio.</th><th>Pasivas</th><th>Pastel</th><th>Progenitores</th><th>Notas</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function renderMaterials() {
+  const direct=deriveMaterials(false), raw=deriveMaterials(true);
+  const table=(rows,mode)=>`<div class="table-wrap"><table><thead><tr><th>Material</th><th>Necesario</th><th>Stock</th><th>Falta</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong></td><td>${r.required}</td><td><input class="inventory-field" type="number" min="0" value="${r.stock}" data-item-id="${esc(r.id)}"></td><td class="${r.missing>0?"missing":"complete"}">${r.missing}</td></tr>`).join("")}</tbody></table></div>`;
+  $("#materialsPanel").innerHTML=`<div class="section-head"><h2>Materiales de construcción</h2><span class="checklist-help">Calculado desde las cantidades objetivo de construcciones vinculadas al catálogo.</span></div><details open><summary>Materiales directos</summary>${table(direct,"direct")}</details><details><summary>Materias primas conocidas (desglose recursivo)</summary><p class="hint">Solo se desglosan recetas verificadas en el catálogo; los componentes sin receta aparecen como material final.</p>${table(raw,"raw")}</details>`;
+}
+function renderCatalogSummary() {
+  const meta=runtimeCatalog.meta||{};
+  $("#catalogSummaryPanel").innerHTML=`<div class="section-head"><h2>Base de datos del juego</h2><button data-action="open-catalog">Abrir catálogo</button></div><p>Versión de juego: <strong>${esc(meta.gameVersion||"sin indicar")}</strong> · build ${esc(meta.build||"—")}. Catálogo cargado: ${catalogAll("pal").length} Pals, ${catalogAll("structure").length} construcciones y ${catalogAll("item").length} ítems.</p><p class="hint">El motor admite importar un snapshot JSON completo y versionado. El catálogo incluido prioriza los registros verificados que intervienen en estas seis bases; no se guarda dentro de Firestore para evitar inflar el tablero compartido.</p>`;
+}
+function renderSources() {
+  $("#sourcesPanel").innerHTML = `<h2>Fuentes de referencia</h2>${Object.entries(store.sources||{}).map(([k,v])=>`<p><strong>${esc(k)}:</strong> <a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a></p>`).join("")}`;
+}
+function updateMetrics() {
+  const all = [...store.tasks];
+  const done = all.filter(r=>r.status==="OK").length;
+  const pct = all.length ? Math.round(done*100/all.length) : 0;
+  $("#globalDone").textContent = done;
+  $("#globalTotal").textContent = all.length;
+  $("#globalPct").textContent = `${pct}%`;
+  $("#globalBar").style.width = `${pct}%`;
+}
+function renderAll() {
+  document.body.classList.toggle("editing",editMode);
+  $("#editBtn").textContent = editMode ? "Cerrar edición" : "Activar edición";
+  renderTabs(); renderBases(); renderBreeding(); renderMaterials(); renderCatalogSummary(); renderSources(); updateMetrics();
+}
+function findRow(collection,id) {
+  if (collection === "bases") return store.bases.find(r=>String(r.id)===String(id));
+  return store[collection]?.find(r=>String(r.id)===String(id));
+}
+function updateField(el) {
+  const {collection,id,field} = el.dataset;
+  const row = findRow(collection,id);
+  if (!row) return;
+  let value = el.value;
+  if (el.type === "number") value = Number(value || 0);
+  row[field] = value;
+  if (collection === "bases" && field === "short") store.tasks.filter(t=>Number(t.base)===Number(id)).forEach(t=>t.base_name=value);
+  save();
+}
+function addRow(collection,base,category="Construcción") {
+  if (collection === "tasks") store.tasks.push({id:uid(`B${base}`),base:Number(base),base_name:store.bases.find(b=>b.id===Number(base))?.short||"",category:CHECKLIST_CATEGORIES.includes(category)?category:"Construcción",area:category,type:category==="Pals"?"Asignar":category==="Producción"?"Producir":category==="Crianza"?"Criar":"Configurar",priority:"P1",item:category==="Pals"?"Nuevo Pal":"Nuevo elemento",pal_no:category==="Pals"?"#":"",qty_target:1,qty_current:0,status:"NO",notes:"",source:""});
+  if (collection === "pal_rosters") store.pal_rosters.push({id:uid("PAL"),base:Number(base),role:"Nuevo rol",pal:"Nuevo Pal",number:"#",qty:1,qty_current:0,work:"",aura:"No",priority:"P1",passives:"",status:"NO",notes:""});
