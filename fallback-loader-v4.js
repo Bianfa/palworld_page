@@ -1,6 +1,15 @@
 (() => {
   const CHUNKS = ["site.b64.00", "site.b64.01", "site.b64.02", "site.b64.03"];
 
+  function normalized(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
   function validate(data) {
     if (!data || !Array.isArray(data.bases) || data.bases.length < 6) {
       throw new Error("El respaldo recuperado no contiene las seis bases.");
@@ -11,16 +20,48 @@
     return data;
   }
 
+  function mergeTechnologyPlan(data) {
+    const plan = window.PALGREMIO_CONSTRUCTION_PLAN;
+    if (!plan?.version || !Array.isArray(plan.tasks) || !plan.tasks.length) return data;
+    const result = { ...data, tasks: [...data.tasks] };
+
+    plan.tasks.forEach((recommendation, index) => {
+      const names = [recommendation.item, ...(recommendation.aliases || [])].map(normalized);
+      const matchIndex = result.tasks.findIndex(task => {
+        if (task?.recommendationKey === recommendation.recommendationKey || task?.id === recommendation.id) return true;
+        return Number(task?.base || 0) === Number(recommendation.base || 0) && names.includes(normalized(task?.item));
+      });
+      if (matchIndex >= 0) {
+        const current = result.tasks[matchIndex];
+        result.tasks[matchIndex] = {
+          ...current,
+          ...recommendation,
+          id: current.id || recommendation.id,
+          qty_current: Number(current.qty_current || 0),
+          status: current.status === "OK" ? "OK" : "NO",
+          orderKey: current.orderKey || `${String(recommendation.base).padStart(2, "0")}-tech-${String(index).padStart(3, "0")}`
+        };
+      } else {
+        result.tasks.push({
+          ...recommendation,
+          orderKey: `${String(recommendation.base).padStart(2, "0")}-tech-${String(index).padStart(3, "0")}`
+        });
+      }
+    });
+    result.technologyPlanVersion = plan.version;
+    return result;
+  }
+
   async function tryPublishedJson(version) {
-    const response = await fetch(`data-v3.part1?v=${encodeURIComponent(version || "4.0.1")}`, { cache: "no-store" });
+    const response = await fetch(`data-v3.part1?v=${encodeURIComponent(version || "4.1.0")}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status} al leer data-v3.part1`);
     const text = (await response.text()).replace(/^\uFEFF/, "");
-    return validate(JSON.parse(text));
+    return mergeTechnologyPlan(validate(JSON.parse(text)));
   }
 
   async function fetchStableZip() {
     const pieces = await Promise.all(CHUNKS.map(async (name) => {
-      const response = await fetch(`${name}?v=4.0.1`, { cache: "no-store" });
+      const response = await fetch(`${name}?v=4.1.0`, { cache: "no-store" });
       if (!response.ok) throw new Error(`No se pudo cargar ${name}`);
       return response.text();
     }));
@@ -92,7 +133,7 @@
     let end = source.indexOf(";\nconst APP_VERSION", after);
     if (end < 0) end = source.indexOf(";\r\nconst APP_VERSION", after);
     if (end < 0) throw new Error("No se encontró el cierre de DEFAULT_DATA.");
-    return validate(JSON.parse(source.slice(after, end)));
+    return mergeTechnologyPlan(validate(JSON.parse(source.slice(after, end))));
   }
 
   async function recoverFromStablePackage() {
