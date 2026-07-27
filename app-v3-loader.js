@@ -1,8 +1,8 @@
-const appNames = ['app-v3.part1', 'app-v3.part2', 'app-v3.part3', 'app-v3.part4'];
+const appNames = ['app-v3.part1', 'app-v3.part2', 'app-v3.part3', 'app-v3.part4', 'app-v3.part5', 'app-v3.part6', 'app-v3.part7'];
 const [chunks, catalogText, firebaseText] = await Promise.all([
-  Promise.all(appNames.map(async (name)=>{ const r=await fetch(name,{cache:"no-store"}); if(!r.ok) throw new Error(`No se pudo cargar ${name}`); return r.text(); })),
-  fetch("catalog-v3.js",{cache:"no-store"}).then(r=>{if(!r.ok) throw new Error("No se pudo cargar catalog-v3.js"); return r.text();}),
-  fetch("firebase-sync.js",{cache:"no-store"}).then(r=>{if(!r.ok) throw new Error("No se pudo cargar firebase-sync.js"); return r.text();})
+  Promise.all(appNames.map(async (name)=>{ const r=await fetch(`${name}?v=3.1.0`,{cache:"no-store"}); if(!r.ok) throw new Error(`No se pudo cargar ${name}`); return r.text(); })),
+  fetch("catalog-v3.js?v=3.1.0",{cache:"no-store"}).then(r=>{if(!r.ok) throw new Error("No se pudo cargar catalog-v3.js"); return r.text();}),
+  fetch("firebase-sync.js?v=3.1.0",{cache:"no-store"}).then(r=>{if(!r.ok) throw new Error("No se pudo cargar firebase-sync.js"); return r.text();})
 ]);
 const catalogUrl=URL.createObjectURL(new Blob([catalogText],{type:"text/javascript"}));
 const firebaseUrl=URL.createObjectURL(new Blob([firebaseText],{type:"text/javascript"}));
