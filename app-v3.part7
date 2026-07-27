@@ -1,0 +1,52 @@
+
+updateField = function(el){
+  const {collection,id,field}=el.dataset; const row=findRow(collection,id); if(!row)return;
+  let value=el.value; if(el.type==="number")value=Number(value||0); row[field]=value;
+  if(collection==="bases"&&field==="short")store.tasks.filter(t=>Number(t.base)===Number(id)).forEach(t=>t.base_name=value);
+  if(collection==="breeding_profiles"&&field==="condensation_stars") row.copies_per_worker=V31_CONDENSATION_PRESETS[Math.max(0,Math.min(4,Number(value||0)))]||1;
+  save();
+};
+
+function v31AutoAllocate(key){
+  const row=v31DeriveBreedingQueue().find(item=>item.key===key); if(!row)return;
+  let available=Math.max(0,Number(store.pal_inventory[key]||0));
+  const order={P0:0,P1:1,P2:2};
+  const tasks=store.tasks.filter(t=>inferTaskCategory(t)==="Pals"&&profileKey(t.pal_no,t.item)===key).sort((a,b)=>(order[a.priority]??9)-(order[b.priority]??9)||Number(a.base)-Number(b.base));
+  for(const task of tasks){const target=Math.max(0,Number(task.qty_target||0));task.qty_current=Math.min(target,available);available-=task.qty_current;}
+  save({message:`${row.name} distribuido automáticamente entre las bases.`});renderAll();
+}
+function v31Recalculate(){
+  v31EnsureStore();
+  save({message:"Crianza, capacidad y materiales recalculados.",history:false});
+  renderAll();
+}
+
+document.addEventListener("change",e=>{
+  if(e.target.matches(".pal-global-field")){
+    store.pal_inventory ||= {}; store.pal_inventory[e.target.dataset.palKey]=Math.max(0,Number(e.target.value||0));
+    save();renderAll();
+  }
+});
+document.addEventListener("click",e=>{
+  if(e.target.id==="showCompletedBreedingBtn"){
+    store.settings.show_completed_breeding=!store.settings.show_completed_breeding;
+    save({history:false,message:store.settings.show_completed_breeding?"Mostrando crianza completada.":"Ocultando crianza completada."});renderAll();
+  }
+  if(e.target.id==="recalculateBtn"||e.target.id==="recalculateTopBtn")v31Recalculate();
+  if(e.target.id==="clearHistoryBtn"){
+    if(confirm("¿Limpiar el historial de cambios? El progreso del tablero no se modificará.")){store.change_history=[];save({history:false,message:"Historial limpiado."});renderAll();}
+  }
+  const action=e.target.closest("[data-action]")?.dataset.action;
+  if(action==="auto-allocate-pal")v31AutoAllocate(e.target.closest("[data-action]").dataset.palKey);
+});
+
+exportBackup = function(){
+  const packageData={exportedAt:new Date().toISOString(),appVersion:V31_VERSION,firebaseProject:FIREBASE_CONFIG.projectId,workspace:getFirebaseSaved()?.workspaceId||null,data:store};
+  const blob=new Blob([JSON.stringify(packageData,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`palworld_bases_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);
+};
+
+v31EnsureStore();
+store.appVersion=V31_VERSION;
+localStorage.setItem(STORAGE_KEY,JSON.stringify(store));
+v31HistoryBaseline=v31Comparable(store);
+renderAll();
