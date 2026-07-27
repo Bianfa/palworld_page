@@ -23,13 +23,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Rebuild site package
+      - name: Prepare direct site
         run: |
-          cat site-v3.b64.* | base64 --decode > site-current.zip
-          unzip -t site-current.zip
           rm -rf _site
           mkdir -p _site
-          unzip -q site-current.zip -d _site
+          cp index.html styles-v3.css app-v3-loader.js app-v3.part1 app-v3.part2 app-v3.part3 app-v3.part4 catalog-v3.js firebase-sync.js data-v3.part1 data-v3.part2 data-v3.part3 data-v3.part4 data-v3.part5 data-v3.part6 data-v3.part7 _site/
+          touch _site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload site

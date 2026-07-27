@@ -1,0 +1,115 @@
+  if (kind === "pal") return runtimeCatalog.pals || [];
+  return runtimeCatalog.items || [];
+}
+function catalogById(kind,id) { return catalogAll(kind).find(x=>String(x.id)===String(id)); }
+function itemById(id) { return catalogById("item",id); }
+function structureForTask(task) {
+  if (task.catalog_type === "structure" && task.catalog_id) return catalogById("structure",task.catalog_id);
+  const n=norm(task.item);
+  return (runtimeCatalog.structures||[]).find(s=>norm(s.name)===n) || null;
+}
+function profileKey(number,name) { return norm(number && number !== "#" ? number : name); }
+function findBreedingProfile(number,name) {
+  const key=profileKey(number,name);
+  let profile=(store.breeding_profiles||[]).find(p=>p.key===key);
+  if (!profile) {
+    const legacy=(store.breeding||[]).find(p=>profileKey(p.number,p.target)===key);
+    profile={id:uid("BPROF"),key,number:number||legacy?.number||"",target:name||legacy?.target||"",passives:legacy?.passives||"Artesano / Serio / Esclavo del trabajo / Nocturno",cake:legacy?.cake||"Pastel especial / vegetal",parent_a:legacy?.parent_a||"",parent_b:legacy?.parent_b||"",notes:legacy?.notes||""};
+    store.breeding_profiles ||= [];
+    store.breeding_profiles.push(profile);
+  }
+  return profile;
+}
+function deriveBreedingQueue() {
+  const groups=new Map();
+  for (const task of store.tasks.filter(t=>inferTaskCategory(t)==="Pals")) {
+    const key=profileKey(task.pal_no,task.item);
+    if (!key) continue;
+    const row=groups.get(key)||{key,name:task.item,number:task.pal_no||"",target:0,current:0,bases:[],roles:new Set(),priorities:[]};
+    const target=Number(task.qty_target||0), current=Number(task.qty_current||0);
+    row.target+=target; row.current+=current;
+    const base=store.bases.find(b=>Number(b.id)===Number(task.base));
+    row.bases.push(`${base?.short||`Base ${task.base}`}: ${target}`);
+    if (task.type) row.roles.add(task.type);
+    if (task.notes) row.roles.add(task.notes);
+    row.priorities.push(task.priority||"P2");
+    if (!row.number && task.pal_no) row.number=task.pal_no;
+    groups.set(key,row);
+  }
+  const order={P0:0,P1:1,P2:2};
+  return [...groups.values()].map(r=>{
+    r.missing=Math.max(0,r.target-r.current);
+    r.priority=[...r.priorities].sort((a,b)=>(order[a]??9)-(order[b]??9))[0]||"P2";
+    r.profile=findBreedingProfile(r.number,r.name);
+    r.roles=[...r.roles];
+    return r;
+  }).sort((a,b)=>(order[a.priority]-order[b.priority]) || b.missing-a.missing || a.name.localeCompare(b.name));
+}
+function expandMaterial(id,qty,out,stack=new Set()) {
+  const item=itemById(id);
+  if (!item?.recipe?.length || stack.has(id)) { out[id]=(out[id]||0)+qty; return; }
+  const next=new Set(stack); next.add(id);
+  for (const [child,amount] of item.recipe) expandMaterial(child,qty*Number(amount||0),out,next);
+}
+function deriveMaterials(expand=false) {
+  const totals={};
+  for (const task of store.tasks.filter(t=>inferTaskCategory(t)==="Construcción")) {
+    const s=structureForTask(task); if (!s?.materials) continue;
+    const qty=Number(task.qty_target||0);
+    for (const [id,name,amount] of s.materials) {
+      if (expand) expandMaterial(id,qty*Number(amount||0),totals);
+      else totals[id]=(totals[id]||0)+qty*Number(amount||0);
+    }
+  }
+  return Object.entries(totals).map(([id,required])=>{const item=itemById(id)||{id,name:id}; const stock=Number(store.inventory?.[id]||0); return {id,name:item.name||id,required,stock,missing:Math.max(0,required-stock),source:item.source||""};}).sort((a,b)=>b.missing-a.missing||a.name.localeCompare(b.name));
+}
+function catalogOptions(kind,value="") {
+  return `<option value="">— Sin vínculo —</option>`+catalogAll(kind).map(x=>`<option value="${esc(x.id)}" ${String(x.id)===String(value)?"selected":""}>${esc(x.name)}${x.number?` (${esc(x.number)})`:""}</option>`).join("");
+}
+function renderCatalog() {
+  const kind=$("#catalogKind").value, q=norm($("#catalogSearch").value);
+  const rows=catalogAll(kind).filter(x=>!q||norm([x.name,x.number,(x.work||[]).join(" "),x.category].join(" ")).includes(q)).slice(0,300);
+  $("#catalogMeta").textContent=`Catálogo ${runtimeCatalog.meta?.gameVersion||""} · ${catalogAll("pal").length} Pals cargados · ${catalogAll("structure").length} construcciones · ${catalogAll("item").length} ítems. Fuente y versión visibles en cada registro.`;
+  $("#catalogResults").innerHTML=rows.map(x=>`<article class="catalog-card"><div><strong>${esc(x.name)}</strong>${x.number?` <span class="badge">${esc(x.number)}</span>`:""}<p>${esc(x.category||"")}${x.work?.length?` · ${esc(x.work.join(" · "))}`:""}</p>${x.materials?`<small>${x.materials.map(m=>`${esc(m[1])} ×${m[2]}`).join(" · ")}</small>`:""}</div><button data-action="catalog-add" data-kind="${kind}" data-catalog-id="${esc(x.id)}">Agregar a la base</button></article>`).join("") || `<p>No hay resultados.</p>`;
+}
+function addCatalogEntry(kind,id,base) {
+  const entry=catalogById(kind,id); if(!entry)return;
+  const b=store.bases.find(x=>Number(x.id)===Number(base));
+  if (kind==="pal") store.tasks.push({id:uid(`B${base}`),base:Number(base),base_name:b?.short||"",category:"Pals",area:"Plantilla de Pals",type:(entry.work||[]).join(" / ")||"Asignar",priority:"P1",item:entry.name,pal_no:entry.number||"#",qty_target:1,qty_current:0,status:"NO",notes:entry.aura&&entry.aura!=="No"?`Aura: ${entry.aura}`:"",source:entry.source||"",catalog_type:"pal",catalog_id:entry.id});
+  else if (kind==="structure") store.tasks.push({id:uid(`B${base}`),base:Number(base),base_name:b?.short||"",category:"Construcción",area:entry.category||"Construcción",type:"Construir",priority:"P1",item:entry.name,pal_no:"",qty_target:1,qty_current:0,status:"NO",notes:entry.work?.join(" + ")||"",source:entry.source||"",catalog_type:"structure",catalog_id:entry.id});
+  else store.tasks.push({id:uid(`B${base}`),base:Number(base),base_name:b?.short||"",category:"Producción",area:"Producción",type:"Fabricar / reunir",priority:"P1",item:entry.name,pal_no:"",qty_target:1,qty_current:0,status:"NO",notes:"",source:entry.source||"",catalog_type:"item",catalog_id:entry.id});
+  save(); renderAll(); renderCatalog();
+}
+async function importCatalogFile(file) {
+  try {
+    const value=JSON.parse(await file.text());
+    const incoming=value.catalog||value;
+    if (!Array.isArray(incoming.pals)||!Array.isArray(incoming.items)||!Array.isArray(incoming.structures)) throw new Error("El JSON debe incluir pals, items y structures.");
+    runtimeCatalog={...runtimeCatalog,...incoming,meta:{...runtimeCatalog.meta,...incoming.meta}};
+    localStorage.setItem("palworld-runtime-catalog-v1",JSON.stringify(runtimeCatalog));
+    renderCatalog(); renderAll();
+  } catch(e) { alert(`Catálogo inválido: ${e.message}`); }
+}
+try { const imported=JSON.parse(localStorage.getItem("palworld-runtime-catalog-v1")||"null"); if(imported)runtimeCatalog=imported; } catch {}
+
+function renderTabs() {
+  $("#tabs").innerHTML = store.bases.map(b => `<button class="tab ${b.id===activeBase?"active":""}" data-action="open-base" data-base="${b.id}">${b.id}. ${esc(b.short)}</button>`).join("");
+}
+function baseEditor(b) {
+  if (!editMode) return `<div class="grid"><div><strong>Objetivo</strong><p>${esc(b.purpose)}</p></div><div><strong>Estado actual</strong><p>${esc(b.current)}</p></div></div><p class="note"><strong>Decisión principal:</strong> ${esc(b.priority)}</p>`;
+  return `<div class="base-editor">
+    <label>Nombre${input(b.name,"bases",b.id,"name")}</label>
+    <label>Nombre corto${input(b.short,"bases",b.id,"short")}</label>
+    <label class="wide">Objetivo${area(b.purpose,"bases",b.id,"purpose")}</label>
+    <label class="wide">Estado actual${area(b.current,"bases",b.id,"current")}</label>
+    <label class="wide">Decisión principal${area(b.priority,"bases",b.id,"priority")}</label>
+  </div>`;
+}
+function renderTaskRows(rows) {
+  const priorityOrder = {P0:0,P1:1,P2:2};
+  return [...rows].sort((a,b)=>(priorityOrder[a.priority]??9)-(priorityOrder[b.priority]??9)).map(t => `<tr>
+    <td>${prioritySelect(t.priority,"tasks",t.id)}</td>
+    ${editMode?`<td>${categorySelect(inferTaskCategory(t),"tasks",t.id)}</td>`:""}
+    <td><strong>${staticOrInput(t.item,"tasks",t.id,"item")}</strong>${editMode && inferTaskCategory(t)==="Construcción"?`<select class="catalog-link" data-task-id="${esc(t.id)}">${catalogOptions("structure",t.catalog_id||"")}</select>`:""}</td>
+    <td>${staticOrInput(t.type,"tasks",t.id,"type")}</td>
+    <td>${staticOrInput(t.pal_no,"tasks",t.id,"pal_no")}</td>

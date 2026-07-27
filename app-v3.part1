@@ -1,0 +1,142 @@
+const DEFAULT_DATA = JSON.parse((await Promise.all(["data-v3.part1","data-v3.part2","data-v3.part3","data-v3.part4","data-v3.part5","data-v3.part6","data-v3.part7"].map(async (name)=>{const r=await fetch(name,{cache:"no-store"});if(!r.ok) throw new Error(`No se pudo cargar ${name}`);return r.text();}))).join(""));
+const APP_VERSION = "3.0.0";
+import { GAME_CATALOG } from "./catalog.js";
+const CHECKLIST_CATEGORIES = ["Construcción","Pals","Configuración","Producción","Logística y bienestar","Crianza"];
+const FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyAHZOymzudoB6LnKAiMgDnjEX7wseRsgZ8",
+  authDomain: "palgremio.firebaseapp.com",
+  projectId: "palgremio",
+  storageBucket: "palgremio.firebasestorage.app",
+  messagingSenderId: "389872031786",
+  appId: "1:389872031786:web:284580576b948b77764b53"
+});
+const STORAGE_KEY = "palworld-bases-workspace-v2";
+const FIREBASE_KEY = "palworld-bases-firebase-v2";
+const DEFAULT_WORKSPACE_ID = "palgremio-tarde-juegos-2026";
+const CLIENT_KEY = "palworld-bases-client-id";
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+const clone = (v) => JSON.parse(JSON.stringify(v));
+const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+const clientId = localStorage.getItem(CLIENT_KEY) || crypto.randomUUID();
+localStorage.setItem(CLIENT_KEY, clientId);
+let editMode = false;
+let activeBase = 1;
+let sync = null;
+let syncReady = false;
+let remoteInitialized = false;
+let revision = 0;
+let cloudTimer = null;
+let lastPayloadJson = "";
+
+function defaultStore() {
+  return {
+    schemaVersion: 4,
+    appVersion: APP_VERSION,
+    ...clone(DEFAULT_DATA),
+    inventory: {},
+    breeding_profiles: [],
+    meta: {
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deletedIds: { tasks: [], pal_rosters: [], production: [], breeding: [], breeding_profiles: [] }
+    }
+  };
+}
+function mergeRows(defaultRows, savedRows, deletedIds = []) {
+  const deleted = new Set((deletedIds || []).map(String));
+  const savedMap = new Map((savedRows || []).filter(Boolean).map(row => [String(row.id ?? row.order), row]));
+  const merged = [];
+  for (const baseRow of defaultRows || []) {
+    const key = String(baseRow.id ?? baseRow.order);
+    if (deleted.has(key)) continue;
+    merged.push(savedMap.has(key) ? { ...baseRow, ...savedMap.get(key) } : clone(baseRow));
+    savedMap.delete(key);
+  }
+  for (const row of savedMap.values()) {
+    const key = String(row.id ?? row.order);
+    if (!deleted.has(key)) merged.push(row);
+  }
+  return merged;
+}
+function normalize(saved) {
+  const fresh = defaultStore();
+  if (!saved || typeof saved !== "object") return fresh;
+  if (!saved.bases && saved.tasks && !Array.isArray(saved.tasks)) {
+    Object.entries(saved.tasks).forEach(([id,status]) => { const row=fresh.tasks.find(t=>t.id===id); if(row) row.status=status; });
+    Object.entries(saved.breeding || {}).forEach(([order,status]) => { const row=fresh.breeding.find(t=>String(t.order)===String(order)); if(row) row.status=status; });
+    return fresh;
+  }
+  const deletedIds = { ...fresh.meta.deletedIds, ...(saved.meta?.deletedIds || {}) };
+  fresh.bases = mergeRows(DEFAULT_DATA.bases, saved.bases, []);
+  for (const key of ["tasks","pal_rosters","production","breeding"]) {
+    fresh[key] = mergeRows(DEFAULT_DATA[key], saved[key], deletedIds[key]);
+  }
+  fresh.inventory = { ...(saved.inventory || saved.meta?.inventory || {}) };
+  fresh.breeding_profiles = Array.isArray(saved.breeding_profiles) ? saved.breeding_profiles : [];
+  fresh.tasks = fresh.tasks.map(task => ({ ...task, category: inferTaskCategory(task) }));
+  if (saved.sources && typeof saved.sources === "object") fresh.sources = { ...fresh.sources, ...saved.sources };
+  fresh.meta = { ...fresh.meta, ...(saved.meta || {}), deletedIds };
+  fresh.schemaVersion = 4;
+  fresh.appVersion = APP_VERSION;
+  return fresh;
+}
+let store;
+try { store = normalize(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")); } catch { store = defaultStore(); }
+
+function save({cloud=true, message="Cambios guardados localmente."}={}) {
+  store.appVersion = APP_VERSION;
+  store.meta.updatedAt = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  revision += 1;
+  $("#saveNote").textContent = message;
+  updateMetrics();
+  if (cloud && syncReady && sync) scheduleCloudSave();
+}
+function scheduleCloudSave() {
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(async () => {
+    const payloadJson = JSON.stringify(store);
+    if (payloadJson === lastPayloadJson) return;
+    try { await sync.push(clone(store), revision); lastPayloadJson = payloadJson; }
+    catch (e) { setSyncStatus("error", e.message); }
+  }, 700);
+}
+function setSyncStatus(kind, text) {
+  const pill = $("#syncPill");
+  pill.textContent = text;
+  pill.className = `sync-pill ${kind === "online" ? "online" : kind === "error" ? "error" : ""}`;
+  $("#syncMessage").textContent = text;
+}
+function getFirebaseSaved() { try { return JSON.parse(localStorage.getItem(FIREBASE_KEY) || "null"); } catch { return null; } }
+function randomWorkspace() { return DEFAULT_WORKSPACE_ID; }
+
+function inferTaskCategory(task) {
+  if (task?.category && CHECKLIST_CATEGORIES.includes(task.category)) return task.category;
+  const area = String(task?.area || "").toLowerCase();
+  const type = String(task?.type || "").toLowerCase();
+  const item = String(task?.item || "").toLowerCase();
+  const base = Number(task?.base || 0);
+  if (area.includes("plantilla de pals") || type === "asignar") return "Pals";
+  if (base === 5 && (type.includes("criar") || item.includes("línea") || item.includes("condensación") || item.includes("mutaciones") || item.includes("soportes de aura"))) return "Crianza";
+  if (area.includes("producción") || ["fabricar","acumular","cocinar"].some(v => type.includes(v))) return "Producción";
+  if (["cofre","almacenamiento","camas","baños","pasillos","accesos","refrigerador","punto de transferencia"].some(v => item.includes(v))) return "Logística y bienestar";
+  if (["configurar","evaluar"].some(v => type.includes(v)) || area.includes("criterio de activación") || item.includes("puesto de supervisión") || item.includes("carteles o códigos")) return "Configuración";
+  return "Construcción";
+}
+function categorySelect(value, collection, id) {
+  return `<select class="edit-field" data-field="category" data-collection="${collection}" data-id="${esc(id)}">${CHECKLIST_CATEGORIES.map(category => `<option ${value===category?"selected":""}>${category}</option>`).join("")}</select>`;
+}
+function statusButton(status, collection, id) { return `<button class="status-btn ${status === "OK" ? "ok" : "no"}" data-action="toggle-status" data-collection="${collection}" data-id="${esc(id)}">${status || "NO"}</button>`; }
+function prioritySelect(value, collection, id) { return `<select class="edit-field" data-field="priority" data-collection="${collection}" data-id="${esc(id)}"><option ${value==="P0"?"selected":""}>P0</option><option ${value==="P1"?"selected":""}>P1</option><option ${value==="P2"?"selected":""}>P2</option></select>`; }
+function input(value, collection, id, field, type="text") { return `<input class="edit-field" type="${type}" value="${esc(value)}" data-field="${field}" data-collection="${collection}" data-id="${esc(id)}">`; }
+function area(value, collection, id, field) { return `<textarea class="edit-field" data-field="${field}" data-collection="${collection}" data-id="${esc(id)}">${esc(value)}</textarea>`; }
+function staticOrInput(value, collection, id, field, type="text") { return editMode ? input(value,collection,id,field,type) : `<span class="field-static">${esc(value)}</span>`; }
+function staticOrArea(value, collection, id, field) { return editMode ? area(value,collection,id,field) : `<span class="field-static">${esc(value)}</span>`; }
+function deleteBtn(collection,id) { return `<button class="small danger edit-only" data-action="delete-row" data-collection="${collection}" data-id="${esc(id)}">Eliminar</button>`; }
+
+
+let runtimeCatalog = clone(GAME_CATALOG);
+const norm = (v) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9#]+/g,"_").replace(/^_+|_+$/g,"");
+function catalogAll(kind) {
+  if (kind === "structure") return runtimeCatalog.structures || [];
