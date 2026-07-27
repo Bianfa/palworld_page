@@ -1,4 +1,15 @@
 
+const v31OriginalNormalize = normalize;
+normalize = function(saved){
+  const result=v31OriginalNormalize(saved);
+  result.pal_inventory={...(saved?.pal_inventory||result.pal_inventory||{})};
+  result.change_history=Array.isArray(saved?.change_history)?saved.change_history:[];
+  result.settings={show_completed_breeding:false,...(saved?.settings||{})};
+  result.schemaVersion=Math.max(Number(result.schemaVersion||0),5);
+  result.appVersion=V31_VERSION;
+  return result;
+};
+
 updateField = function(el){
   const {collection,id,field}=el.dataset; const row=findRow(collection,id); if(!row)return;
   let value=el.value; if(el.type==="number")value=Number(value||0); row[field]=value;
