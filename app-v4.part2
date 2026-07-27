@@ -139,17 +139,35 @@ document.addEventListener("click", event => {
 });
 
 async function bootstrap() {
-  setSync("connecting", "Cargando", "Leyendo respaldo seguro");
-  const response = await fetch(`data-v3.part1?v=${VERSION}`, { cache: "no-store" });
-  if (!response.ok) throw new Error("No se pudo cargar el respaldo inicial.");
-  const fallback = await response.json();
-  if (!Array.isArray(fallback.tasks) || fallback.tasks.length === 0) throw new Error("El respaldo inicial no contiene tareas; se detuvo la carga para proteger el tablero.");
-  state.fallback = fallback;
+  setSync("connecting", "Cargando", "Recuperando respaldo protegido");
   const cache = readCache();
-  state.bases = Array.isArray(cache?.bases) && cache.bases.length ? cache.bases : fallback.bases;
-  state.tasks = (Array.isArray(cache?.tasks) && cache.tasks.length ? cache.tasks : fallback.tasks).map(normalizeTask);
-  state.inventory = cache?.inventory || {};
-  render();
+  let fallback = null;
+  let fallbackError = null;
+
+  try {
+    if (!window.PALGREMIO_FALLBACK?.load) throw new Error("No se cargó el recuperador de respaldo.");
+    fallback = await window.PALGREMIO_FALLBACK.load(VERSION);
+  } catch (error) {
+    fallbackError = error;
+    console.error("No fue posible recuperar el respaldo local.", error);
+    fallback = {
+      bases: Array.isArray(cache?.bases) ? cache.bases : [],
+      tasks: Array.isArray(cache?.tasks) ? cache.tasks : [],
+      inventory: cache?.inventory || {}
+    };
+  }
+
+  state.fallback = fallback;
+  state.bases = Array.isArray(cache?.bases) && cache.bases.length ? cache.bases : (fallback.bases || []);
+  state.tasks = (Array.isArray(cache?.tasks) && cache.tasks.length ? cache.tasks : (fallback.tasks || [])).map(normalizeTask);
+  state.inventory = cache?.inventory || fallback.inventory || {};
+
+  if (state.bases.length && state.tasks.length) {
+    render();
+    if (fallback.recoveredFrom === "stable-package") toast(`Respaldo estable recuperado: ${fallback.tasks.length} tareas`);
+  } else {
+    setSync("connecting", "Conectando", "Buscando tareas directamente en Firebase");
+  }
 
   try {
     state.cloud = await createCloudStore({
@@ -169,14 +187,18 @@ async function bootstrap() {
           state.workspace = workspace;
           if (Array.isArray(workspace?.bases) && workspace.bases.length) state.bases = workspace.bases;
           if (workspace?.inventory && typeof workspace.inventory === "object") state.inventory = workspace.inventory;
-          render();
+          if (state.bases.length && state.tasks.length) render();
         },
         onHistory(history) { state.history = history || []; if (state.view === "admin") renderAdmin(); }
       }
     });
     setSync("online", "Sincronizado", `${state.tasks.length} tareas en Firebase`);
-    render();
+    if (state.bases.length && state.tasks.length) render();
   } catch (error) {
+    if (!state.tasks.length) {
+      const localReason = fallbackError ? ` Respaldo local: ${fallbackError.message}` : "";
+      throw new Error(`${error.message}${localReason}`);
+    }
     setSync("error", "Modo local protegido", error.message);
     toast(error.message);
     render();
