@@ -54,7 +54,12 @@ jobs:
           test -s _site/app-v4.part1
           test -s _site/app-v4.part2
           test -s _site/data-v3.part1
-          node -e "const d=require('./_site/data-v3.part1'); if(d.tasks.length<100) process.exit(1); console.log(d.tasks.length+' tareas listas')"
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('_site/data-v3.part1', 'utf8'));
+          if (!Array.isArray(data.tasks) || data.tasks.length < 100) process.exit(1);
+          console.log(`${data.tasks.length} tareas listas para publicar`);
+          NODE
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload site
