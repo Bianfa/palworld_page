@@ -1,0 +1,36 @@
+name: Validate PalGremio v4
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate JavaScript
+        run: |
+          cat app-v4.part1 app-v4.part2 > /tmp/app-v4.js
+          node --check /tmp/app-v4.js
+          node --check app-v4-loader.js
+          node --check firebase-store-v4.js
+      - name: Validate backup data
+        run: |
+          python - <<'PY'
+          import json
+          with open('data-v3.part1', encoding='utf-8') as fh:
+              data = json.load(fh)
+          assert len(data.get('bases', [])) >= 6, 'Faltan bases'
+          assert len(data.get('tasks', [])) >= 100, 'El respaldo de tareas está vacío o incompleto'
+          print('Bases:', len(data['bases']), 'Tareas:', len(data['tasks']))
+          PY
+      - name: Validate commercial shell
+        run: |
+          grep -q 'PalGremio' index.html
+          grep -q 'app-v4-loader.js' index.html
+          grep -q 'firebase-store-v4.js' app-v4-loader.js
