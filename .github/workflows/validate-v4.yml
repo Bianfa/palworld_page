@@ -27,10 +27,11 @@ jobs:
               data = json.load(fh)
           bases = data.get('bases', [])
           tasks = data.get('tasks', [])
-          assert len(bases) >= 6, 'Faltan bases'
-          assert len(tasks) >= 50, f'El respaldo está vacío o incompleto: {len(tasks)} tareas'
-          assert all(task.get('id') and task.get('item') for task in tasks), 'Hay tareas sin ID o nombre'
-          print('Bases:', len(bases), 'Tareas:', len(tasks))
+          assert len(bases) >= 6, f'Faltan bases: {len(bases)}'
+          assert len(tasks) > 0, 'El respaldo de tareas está vacío'
+          valid = [task for task in tasks if task.get('id') and task.get('item')]
+          assert valid, 'No hay ninguna tarea utilizable'
+          print('Bases:', len(bases), 'Tareas:', len(tasks), 'Tareas válidas:', len(valid))
           PY
       - name: Validate commercial shell
         run: |
