@@ -1,5 +1,5 @@
 try {
-  const version = "4.0.2";
+  const version = "4.1.0";
   const names = ["app-v4.part1", "app-v4.part2"];
   const [chunks, firebaseModule] = await Promise.all([
     Promise.all(names.map(async name => {
