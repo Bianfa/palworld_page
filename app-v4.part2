@@ -91,13 +91,22 @@ function exportBackup() {
   link.click();
   URL.revokeObjectURL(link.href);
 }
+function setMobileMenu(open) {
+  const sidebar = $(".sidebar");
+  const backdrop = $("#navBackdrop");
+  const button = $("#mobileMenuBtn");
+  sidebar?.classList.toggle("open", Boolean(open));
+  backdrop?.classList.toggle("show", Boolean(open));
+  button?.setAttribute("aria-expanded", String(Boolean(open)));
+  document.body.classList.toggle("menu-open", Boolean(open));
+}
 
 document.addEventListener("click", event => {
   const actionEl = event.target.closest("[data-action]");
   const nav = event.target.closest("[data-view]");
   if (nav) {
     state.view = nav.dataset.view;
-    $(".sidebar").classList.remove("open");
+    setMobileMenu(false);
     render();
     return;
   }
@@ -108,7 +117,8 @@ document.addEventListener("click", event => {
   if (action === "toggle-task") toggleTask(actionEl.dataset.taskId);
 });
 $("#newTaskBtn").addEventListener("click", () => populateForm());
-$("#mobileMenuBtn").addEventListener("click", () => $(".sidebar").classList.toggle("open"));
+$("#mobileMenuBtn").addEventListener("click", () => setMobileMenu(!$(".sidebar").classList.contains("open")));
+$("#navBackdrop").addEventListener("click", () => setMobileMenu(false));
 $("#globalSearch").addEventListener("input", event => { state.search = event.target.value; render(); });
 $("#closeTaskDialog").addEventListener("click", () => $("#taskDialog").close());
 $("#cancelTaskBtn").addEventListener("click", () => $("#taskDialog").close());
@@ -125,6 +135,12 @@ $("#deleteTaskBtn").addEventListener("click", async () => {
   if (!task || !confirm(`¿Eliminar "${task.item}"?`)) return;
   $("#taskDialog").close();
   await deleteTask(task);
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") setMobileMenu(false);
+});
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 820) setMobileMenu(false);
 });
 document.addEventListener("change", event => {
   if (event.target.id === "statusFilter") state.filters.status = event.target.value;
