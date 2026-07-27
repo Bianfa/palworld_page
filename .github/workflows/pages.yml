@@ -39,21 +39,23 @@ jobs:
           if (!Array.isArray(data.bases) || data.bases.length < 6) throw new Error('El respaldo no contiene las seis bases');
           if (!Array.isArray(data.tasks) || data.tasks.length < 100) throw new Error(`Respaldo incompleto: ${data.tasks?.length || 0} tareas`);
           data.schemaVersion = 6;
-          data.appVersion = '4.0.0';
+          data.appVersion = '4.0.1';
           fs.mkdirSync('_site', { recursive: true });
           fs.writeFileSync('_site/data-v3.part1', JSON.stringify(data));
           console.log(`Respaldo generado: ${data.bases.length} bases y ${data.tasks.length} tareas`);
           NODE
       - name: Prepare commercial site
         run: |
-          cp index.html styles-v4.css app-v4-loader.js app-v4.part1 app-v4.part2 firebase-store-v4.js _site/
+          cp index.html styles-v4.css app-v4-loader.js app-v4.part1 app-v4.part2 firebase-store-v4.js fallback-loader-v4.js _site/
           touch _site/.nojekyll
       - name: Validate required files
         run: |
           test -s _site/index.html
           test -s _site/app-v4.part1
           test -s _site/app-v4.part2
+          test -s _site/fallback-loader-v4.js
           test -s _site/data-v3.part1
+          node --check _site/fallback-loader-v4.js
           node - <<'NODE'
           const fs = require('fs');
           const data = JSON.parse(fs.readFileSync('_site/data-v3.part1', 'utf8'));
