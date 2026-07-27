@@ -15,43 +15,55 @@
 <main>
   <div class="spinner" id="spinner"></div>
   <h1>Plan de Bases Palworld 1.0</h1>
-  <p id="status">Cargando la aplicación…</p>
+  <p id="status">Cargando la versión estable…</p>
   <div id="error"></div>
 </main>
 <script type="module">
   import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
-  const names = ["site-v3.b64.00"];
+
+  const names = ["site.b64.00", "site.b64.01", "site.b64.02", "site.b64.03"];
   const status = document.querySelector("#status");
   const errorBox = document.querySelector("#error");
+
   try {
-    status.textContent = "Reconstruyendo la versión 3.0…";
+    status.textContent = "Reconstruyendo la versión estable 2.2…";
     const chunks = await Promise.all(names.map(async (name) => {
-      const response = await fetch(`${name}?v=3.0.0`, { cache: "no-store" });
+      const response = await fetch(`${name}?v=2.2.1`, { cache: "no-store" });
       if (!response.ok) throw new Error(`No se pudo descargar ${name}`);
       return response.text();
     }));
-    const binary = atob(chunks.join("").replace(/\s+/g, ""));
-    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+
+    const base64 = chunks.join("").replace(/\s+/g, "");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
     const zip = await JSZip.loadAsync(bytes);
-    const required = ["index.html", "styles.css", "app.js", "firebase-sync.js", "catalog.js"];
+    const required = ["index.html", "styles.css", "app.js", "firebase-sync.js"];
     for (const file of required) if (!zip.file(file)) throw new Error(`El paquete no contiene ${file}`);
-    const [html, css, firebaseModule, catalogModule] = await Promise.all([
-      zip.file("index.html").async("string"), zip.file("styles.css").async("string"),
-      zip.file("firebase-sync.js").async("string"), zip.file("catalog.js").async("string")
+
+    const [html, css, firebaseModule] = await Promise.all([
+      zip.file("index.html").async("string"),
+      zip.file("styles.css").async("string"),
+      zip.file("firebase-sync.js").async("string")
     ]);
     let app = await zip.file("app.js").async("string");
+
     const firebaseUrl = URL.createObjectURL(new Blob([firebaseModule], { type: "text/javascript" }));
-    const catalogUrl = URL.createObjectURL(new Blob([catalogModule], { type: "text/javascript" }));
     app = app.replaceAll('"./firebase-sync.js"', JSON.stringify(firebaseUrl));
-    app = app.replaceAll('"./catalog.js"', JSON.stringify(catalogUrl));
     const appUrl = URL.createObjectURL(new Blob([app], { type: "text/javascript" }));
+
     const finalHtml = html
       .replace(/<link[^>]+href=["']styles\.css["'][^>]*>/i, `<style>${css}</style>`)
-      .replace(/<script[^>]+src=["']app\.js["'][^>]*><\/script>/i, `<script type="module" src="${appUrl}"><\/script>`);
-    document.open(); document.write(finalHtml); document.close();
+      .replace(/<script[^>]+src=["']app\.js["'][^>]*><\/script>/i, `<script type="module" src="${appUrl}"><\/script>`)
+      .replace(/<\/body>/i, `<script src="palworld-checklist-v22.js?v=2.2.1"><\/script><\/body>`);
+
+    document.open();
+    document.write(finalHtml);
+    document.close();
   } catch (error) {
     document.querySelector("#spinner").style.display = "none";
-    status.textContent = "No fue posible abrir la aplicación.";
+    status.textContent = "No fue posible abrir la versión estable.";
     errorBox.style.display = "block";
     errorBox.textContent = `${error.message}. Recarga con Ctrl+F5.`;
     console.error(error);
